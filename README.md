@@ -21,23 +21,34 @@ public job boards → normalized jobs → local scoring → review dashboard →
 - Atomic scans, bounded source concurrency, and JSON contracts for agents and scripts
 - No automatic applications, telemetry, or vendor lock-in
 
+## Agents and scripts
+
+Use the same CLI and JSON contracts with Claude, Codex, other agents, or normal scripts. Any agent or script can run readiness checks, scan official boards, score jobs, and build the dashboard; no agent subscription is required.
+
+The optional [agent workflow adapter](.codex/skills/job-radar/SKILL.md) documents the CLI workflow. AI review is opt-in through a provider command you configure. See the [operator guide](docs/operator-guide.md) for command examples and the [external data contracts](docs/external-data-contracts.md) for the fields sent to that command.
+
 ## Quick start
 
 Requires Python 3.11+.
 
+```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
+New-Item -ItemType Directory -Force user-data | Out-Null
 Copy-Item config.example\profile.yaml user-data\profile.yaml
 job-radar --json doctor
 job-radar --json run
 python -m http.server 8000 --directory dashboard\public
+```
 
 Open http://localhost:8000.
 
 Preview with example data:
 
+```powershell
 job-radar build-dashboard --jobs examples\jobs.example.json --output dashboard\public\index.html
+```
 
 ## Configure
 
@@ -66,15 +77,15 @@ Optional AI scoring receives structured preferences and public job fields. It do
 
 ## Docs
 
-- docs/getting-started.md
-- docs/configuration.md
-- docs/cli.md
-- docs/architecture.md
-- docs/privacy-and-data.md
-- docs/source-policy.md
-- docs/ai-scoring.md
-- docs/scheduling.md
-- docs/cloudflare-sync.md
+- [Operator guide](docs/operator-guide.md): scanning, scoring, AI review, tracking, dashboard, and runtime boundaries
+- [Example configuration](config.example/profile.yaml): local profile and source settings
+- [Privacy and local data](docs/privacy-and-data.md): retention, export, deletion, and external processing
+- [Source policy](SOURCE_POLICY.md): official ATS allowlist and excluded automation
+- [External data contracts](docs/external-data-contracts.md): compact AI review, legacy scoring, and sync payloads
+- [Agent workflow and scheduling examples](.codex/skills/job-radar/SKILL.md)
+- [Optional Cloudflare status sync](optional-sync/cloudflare/README.md)
+- [Migration from job-tracker-skill](docs/migration-from-job-tracker-skill.md)
+- [Release checklist](docs/release-checklist.md)
 
 ## Boundaries
 
@@ -84,7 +95,9 @@ This project is independent and is not affiliated with any job board, ATS provid
 
 ## Development
 
+```powershell
 .\.venv\Scripts\python.exe -m pytest -q
+```
 
 ## License
 

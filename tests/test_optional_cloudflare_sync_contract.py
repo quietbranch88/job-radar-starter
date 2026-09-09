@@ -92,11 +92,14 @@ def test_optional_package_pins_verified_worker_test_dependencies():
     assert package["scripts"]["dev"] == "wrangler dev --local"
     assert package["scripts"]["deploy"] == "wrangler deploy"
     assert package["devDependencies"] == {
-        "@cloudflare/vitest-pool-workers": "0.18.5",
-        "@cloudflare/workers-types": "5.20260716.1",
+        "@cloudflare/vitest-pool-workers": "0.18.8",
+        "@cloudflare/workers-types": "5.20260722.1",
         "typescript": "7.0.2",
-        "vitest": "4.1.10",
-        "wrangler": "4.111.0",
+        "vitest": "4.1.11",
+        "wrangler": "4.114.0",
+    }
+    assert package["overrides"] == {
+        "miniflare": {"sharp": "0.35.4", "undici": "7.29.0"},
     }
 
 
