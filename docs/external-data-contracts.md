@@ -76,6 +76,26 @@ provider data is the priority. The legacy process boundary nevertheless uses
 the same isolated process group, streaming stdout/stderr limits, timeout, and
 descendant cleanup as compact review.
 
+## Optional Sheets delivery and local review receipts
+
+The separate opt-in Sheets adapter uses Google Sheets REST v4 metadata/values
+reads and fixed-range `PUT` values with `valueInputOption=RAW`; never append.
+The dedicated tab's owned row is exactly `job_id`, `payload_hash`, `company`,
+`title`, `url`, `status`, `applied_at`, `resume_version`, `confirmation_evidence`.
+Only the last three application fields from explicitly confirmed local state may
+be projected; missing evidence is refused, not inferred from browser markers.
+Rows carry a target/job/content digest and require readback before acknowledgement.
+OAuth credentials are request headers only. See the
+[operator contract](operator-guide.md#10-deliver-a-minimal-snapshot-to-an-owned-sheets-tab)
+and [privacy obligations](privacy-and-data.md). This is not the Cloudflare
+payload or a general-purpose spreadsheet writer. An injected transport is a
+boundary substitution, not evidence of the built-in HTTP transport's operation.
+
+Review receipts are local attestations only; no new provider request fields are
+introduced. Resume digests/reviewer identities/references are not sent to Google
+or the Dashboard. Source health is likewise a separate local receipt, not a
+change to public scan v1 fields.
+
 ## Optional Cloudflare status sync
 
 The local `tracking record-application` bridge is separate from this sync

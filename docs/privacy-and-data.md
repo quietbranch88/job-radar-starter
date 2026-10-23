@@ -17,14 +17,19 @@ Raw and normalized runs are written under `scans/`. Dashboard decisions and
 theme preference are separate browser localStorage values. Clearing files does
 not clear browser localStorage, and clearing the browser does not delete files.
 
-`LocalTrackingStore.export_to` writes applications, events, lifecycle, and
-rejected state to a destination outside managed `user-data/`. Review cache and
+Optional commands additionally create `tracking/sheets-outbox.json` and
+`review/receipts.json`; initialization does not create these documents.
+`LocalTrackingStore.export_to` writes applications, events, lifecycle, rejected
+state and any existing optional outbox/receipts to a destination outside managed
+`user-data/`. Review cache and
 company facts are intentionally excluded. Exported files are not deleted by
 `LocalTrackingStore.delete_tracking_data`; the operator must locate and remove
 exports separately.
 
 `LocalTrackingStore.delete_tracking_data` deletes the six managed JSON files
-above and then removes empty managed directories. It does not delete `scans/`,
+above plus existing optional outbox/receipts, after acquiring their writer
+guards, and then removes empty managed directories. Persistent `.lock`/`.guard`
+files contain no review/application payload and remain. It does not delete `scans/`,
 browser localStorage, dashboard exports, or other files outside the configured
 root.
 
@@ -67,6 +72,31 @@ party and receives the status contract described in
 responsible for credentials, access control, retention, disclosure, deletion,
 and applicable law. This project is not legal advice.
 
+Google Sheets delivery is a separate opt-in command, not automatic scan or
+Dashboard sync. Enqueue is local-only. `sheet-sync deliver --confirm-write`
+shares the allowlisted company/title/public URL/status and, only when explicitly
+projected from a confirmed application, submission time, resume version and short
+confirmation reference. No resume contents, email, personal notes or full JD are
+sent. The OAuth token is caller-provisioned via an environment variable, used in
+HTTPS headers only and never copied to the outbox or report. The project does
+not log in, discover, refresh or store Google credentials.
+
+The operator must own the dedicated target tab, control its sharing and review
+Google/account retention, regional processing and deletion policies. There is no
+automatic expiry: local outbox payloads and receipts remain until explicit local
+deletion, and the 500-item bound includes delivered history. Local deletion does
+not delete or revoke Google rows or separately exported files. Remote removal
+must be done separately by the owner; this CLI has no remote delete/share API.
+Blocked conflicts require explicit reconciliation, never silent overwrite.
+
+Review approval receipts contain supplied job/JD/resume hashes, reviewer identity,
+short evidence reference, decision and aware timestamp. They are operator
+attestations, not signatures or proof of independent human review. Receipt
+creation never opens/uploads a resume or contacts a reviewer/provider. References
+are not dereferenced; keep them non-sensitive. Receipts are retained without
+automatic expiry and included only in explicit local export, not the Dashboard,
+provider or Sheets payload.
+
 ## Observation checkpoints and execution receipts
 
 Opt-in checkpoints contain public posting data, company-board scope, completion
@@ -83,3 +113,8 @@ storage. Persistent guard files must not be deleted while a writer is active.
 The 128 MiB checkpoint bound limits size, not retention time. Saved low-score
 observations remain available locally; Dashboard projection and configured
 review input include only eligible jobs.
+
+Optional `--health-output` records configured board identifiers, safe categories,
+HTTP error status, local durations and cached/actual fetch timestamps. It does
+not retain raw upstream errors, tokens or response bodies. It follows the same
+explicit-removal policy as checkpoints and is not removed by tracking deletion.

@@ -109,6 +109,14 @@ offline `build-dashboard --profile`, and per-attempt stage receipts are describe
 in the [operator guide](docs/operator-guide.md#6-preserve-observations-and-resume-a-company-walk).
 These are local capabilities, not automatic application submission or deployment.
 
+Optional source-health receipts distinguish cached observations from actual
+fetches and safe failure categories. Separate `review-receipt` commands record
+explicit job/JD/resume-hash attestations; provider completion is never approval.
+Opt-in `sheet-sync` uses a durable, readback-verified outbox on a dedicated owned
+Google Sheets tab, not an existing master-sheet migration. Both are disabled
+unless explicitly invoked; see the [operator guide](docs/operator-guide.md#8-diagnose-configured-sources)
+and [privacy rules](docs/privacy-and-data.md).
+
 ## License
 
 MIT

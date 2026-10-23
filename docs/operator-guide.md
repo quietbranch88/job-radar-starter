@@ -134,9 +134,9 @@ review. Browser status buttons persist in localStorage.
 ## 5. Export, delete, or sync
 
 Use `LocalTrackingStore.export_to` to export applications, events, lifecycle,
-and rejection data outside the managed root. Use
+and rejection data, plus existing optional Sheets outbox/review receipts, outside the managed root. Use
 `LocalTrackingStore.delete_tracking_data` to delete managed tracking, lifecycle,
-rejected, review cache, and company-fact files. Exports, scans, and browser
+rejected, review cache, company-fact files and optional outbox/receipts. Exports, scans, and browser
 localStorage require separate deletion.
 
 Cloudflare sync is optional. If you enable it, configure your own Worker,
@@ -217,3 +217,91 @@ exit may leave a stage `running`; inspect the checkpoint and resume explicitly.
 Only complete company reads are reusable, and an interrupted in-flight read is
 retried. Run output serialization protects one jobs-output path; it does not make
 independent commands sharing a user-data directory a multi-writer database.
+
+## 8. Diagnose configured sources
+
+Add `--health-output scans/source-health.json` to `scan` or `run`. This separate
+v1 health receipt leaves the scan envelope unchanged and names its scope as
+`configured_company_boards`, never a full provider catalogue. Per-board outcomes
+distinguish complete, cached, failed, interrupted and unattempted work. Cached
+entries keep their original fetch timestamp and have no new attempt duration.
+HTTP error status/categories and network errors contain no raw upstream text.
+Connection timeouts use `network_timeout` in health while preserving `timeout`
+in the existing scan failure contract. Parent deadlines remain `timeout`.
+Diagnostics do not automatically retry; use a matching checkpoint and `--resume`.
+
+## 9. Record a version-bound review attestation
+
+```powershell
+job-radar --json review-receipt record --user-data user-data --jobs scans/latest.json --job-id JOB_ID --jd-sha256 JD_SHA256 --resume-sha256 RESUME_SHA256 --reviewer REVIEWER --evidence LOCAL_REVIEW_REFERENCE --decision approve --reviewed-at 2026-10-24T09:00:00+08:00 --confirm-reviewed
+job-radar --json review-receipt check --user-data user-data --jobs scans/latest.json --job-id JOB_ID --jd-sha256 JD_SHA256 --resume-sha256 RESUME_SHA256
+```
+
+Supply real 64-character lowercase hashes, not those placeholders. The CLI
+checks that the JD hash matches the saved job snapshot. The operator supplies
+the actual final resume digest; the CLI never opens that file. The explicit flag
+attests that review occurred, not that a provider finished. Latest reviewed time
+for the exact job/JD/resume governs; equal times prefer rejection. A matching
+rejection is applicable but not approved. Changing the JD or resume invalidates
+the old approval; historical receipts remain. Future review timestamps are
+refused. A receipt is neither cryptographic reviewer authentication nor permission
+to apply. No application automation is added.
+
+## 10. Deliver a minimal snapshot to an owned Sheets tab
+
+This optional command is separate from `run` and Cloudflare. It does **not** map
+or modify an existing job master sheet. Precreate a dedicated tab with exactly
+nine grid columns, 2..1001 rows and these literal row-1 headers:
+
+```text
+job_id,payload_hash,company,title,url,status,applied_at,resume_version,confirmation_evidence
+```
+
+Use a private target owned by this single local writer. No other host, person or
+automation may concurrently edit it. Formulas/unknown rows, duplicate IDs,
+unexpected headers or capacity fail closed; the CLI does not repair them.
+
+```powershell
+job-radar --json sheet-sync enqueue --user-data user-data --jobs scans/latest.json --job-id JOB_ID --spreadsheet-id SHEET_ID --tab SyncTest
+job-radar --json sheet-sync status --user-data user-data
+job-radar --json sheet-sync deliver --user-data user-data --spreadsheet-id SHEET_ID --tab SyncTest --max-items 1 --confirm-write
+```
+
+Enqueue is local and defaults to `interested`, never `applied`.
+`--from-application` uses only an explicitly confirmed local application with
+actual submission time (or `unknown`), resume version and evidence. A browser
+marker is insufficient. Keep URLs canonical without query/fragment/userinfo;
+resume version is an identifier, not a private path. Unsupported text is refused,
+not silently sanitized. No personal notes or resume content are sent.
+
+Before delivery, securely provision your own `JOB_RADAR_SHEETS_ACCESS_TOKEN` in
+the environment with appropriate Google permissions. Do not paste it into a
+command, config, issue or chat. No token creation or login discovery is provided.
+Missing credentials/confirmation perform no request. Read
+[`privacy-and-data.md`](privacy-and-data.md) before authorizing disclosure.
+
+Each intent is saved before network access. Delivery reads the keyed row,
+rechecks its version before a fixed-range RAW write, and reads back before local
+acknowledgement. Retry after uncertain delivery reconciles an exact existing
+version without appending. Updates require `--expected-remote-hash` from a known
+acknowledged version. Conflicts block the target rather than overwriting it.
+This is single-writer idempotency, not distributed CAS or global exactly-once.
+Repeated enqueue of the current transition is write-free; after intervening
+acknowledged versions, a repeated transition gets a new bounded occurrence in
+local history so A-to-B-to-A-to-B cannot be mistaken for an old completed B.
+Earlier experimental outbox records without an occurrence remain readable.
+
+Default work is five items; `--max-items` allows 1..20, at most seven HTTP calls
+per fresh item. Each direct HTTP request has a 10-second socket timeout and
+4 MiB response limit. There is no hidden retry/backoff loop. Remote uncertainty
+remains pending for manual reconciliation up to three attempts; semantic failures
+block immediately. Wait/back off before retrying quota errors. A non-null error
+is a nonzero exit. The outbox retains at most 500 items including delivered
+receipts; export and reconcile explicitly, without silent history pruning.
+Local deletion never deletes an existing Google copy.
+
+Optional managed outbox/receipt files, their guards and parent directories must
+be unaliased local paths. Existing symlinks, junctions and hardlinked state/guards
+are refused before recording, export or deletion. This is not protection against
+an attacker replacing filesystem paths during an operation; keep user-data under
+exclusive local control.

@@ -57,6 +57,7 @@ def _add_profile_argument(parser: argparse.ArgumentParser) -> None:
 def _add_checkpoint_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--checkpoint', type=Path, help='opt-in company-level scan progress file')
     parser.add_argument('--resume', action='store_true', help='resume an existing matching checkpoint')
+    parser.add_argument('--health-output', type=Path, help='optional separate source-health receipt with per-company timing and cached/fetch scope')
 
 
 def _add_review_arguments(parser: argparse.ArgumentParser) -> None:
@@ -197,6 +198,38 @@ def _parser() -> argparse.ArgumentParser:
     recording.add_argument("--confirmation-evidence", required=True)
     recording.add_argument("--confirmed-at", required=True, help="ISO datetime with timezone when the submission was confirmed")
     recording.add_argument("--confirm-submitted", action="store_true")
+
+    receipts = commands.add_parser('review-receipt', help='explicit local attestation bound to JD and resume hashes; never submits applications')
+    receipt_commands = receipts.add_subparsers(dest='receipt_command', required=True)
+    for name in ('record', 'check'):
+        receipt = receipt_commands.add_parser(name)
+        receipt.add_argument('--user-data', type=Path, default=DEFAULT_USER_DATA)
+        receipt.add_argument('--jobs', type=Path, required=True)
+        receipt.add_argument('--job-id', required=True)
+        receipt.add_argument('--jd-sha256', required=True)
+        receipt.add_argument('--resume-sha256', required=True, help='digest supplied by the operator; resume files are never opened')
+        if name == 'record':
+            receipt.add_argument('--reviewer', required=True)
+            receipt.add_argument('--evidence', required=True)
+            receipt.add_argument('--decision', choices=('approve', 'reject'), required=True)
+            receipt.add_argument('--reviewed-at', required=True)
+            receipt.add_argument('--confirm-reviewed', action='store_true')
+    sync = commands.add_parser('sheet-sync', help='opt-in dedicated-tab delivery; never submits applications')
+    sync_commands = sync.add_subparsers(dest='sync_command', required=True)
+    for name in ('enqueue', 'status', 'deliver'):
+        item = sync_commands.add_parser(name)
+        item.add_argument('--user-data', type=Path, default=DEFAULT_USER_DATA)
+        if name != 'status':
+            item.add_argument('--spreadsheet-id', required=True)
+            item.add_argument('--tab', required=True)
+        if name == 'enqueue':
+            item.add_argument('--jobs', type=Path, required=True)
+            item.add_argument('--job-id', required=True)
+            item.add_argument('--from-application', action='store_true', help='use explicitly confirmed local application evidence, never browser status')
+            item.add_argument('--expected-remote-hash', help='known previous acknowledged payload hash for an update')
+        if name == 'deliver':
+            item.add_argument('--confirm-write', action='store_true', help='authorize minimal metadata sharing with Google on this dedicated target')
+            item.add_argument('--max-items', type=int, default=5)
     return parser
 
 
@@ -533,6 +566,17 @@ def _validate_output_boundary(output: Path, *, inputs=(), user_data: Path | None
             raise ValueError('output cannot replace managed tracking or review state')
 
 
+def _validate_review_snapshot(args) -> None:
+    _kind, raw, _jobs = _load_jobs_document(args.jobs)
+    matches = {
+        item.get('jd_hash', '') for item in _job_items(raw)
+        if (item.get('stable_id') or stable_job_id(source=item['source'], external_id=item['external_id'],
+            company=item['company'], title=item['title'])) == args.job_id
+    }
+    if matches != {args.jd_sha256} or not args.jd_sha256:
+        raise ValueError('review JD hash must match one unambiguous current job snapshot')
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -540,6 +584,7 @@ def main(
     command_runner=subprocess.run,
     scan_runner=None,
     review_runner=None,
+    sheet_transport=None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
@@ -553,6 +598,56 @@ def main(
         scan_runner = scan_catalog_resilient
     run_receipt: RunReceipt | None = None
     try:
+        if args.command == 'sheet-sync':
+            from job_radar.sheet_sync import GoogleSheetsAdapter, SheetOutbox
+
+            store = LocalTrackingStore(args.user_data.absolute())
+            outbox = SheetOutbox(store.path_for('sheet_outbox'))
+            if args.sync_command == 'status':
+                report = {'ok': True, 'operation': 'sheet-sync.status', 'result': outbox.status()}
+            else:
+                if args.sync_command == 'deliver' and not args.confirm_write:
+                    raise ValueError('Sheets delivery requires explicit --confirm-write; local deletion will not delete Google copies')
+                transport = sheet_transport
+                if args.sync_command == 'deliver' and transport is None:
+                    from job_radar.sheets_transport import OAuthSheetsTransport
+                    transport = OAuthSheetsTransport()
+                adapter = GoogleSheetsAdapter(args.spreadsheet_id, args.tab, transport)
+                if args.sync_command == 'enqueue':
+                    from job_radar.sheet_commands import enqueue_snapshot
+                    if args.jobs.resolve() == outbox.path.resolve():
+                        raise ValueError('job snapshot must be separate from outbox state')
+                    _kind, raw, _jobs = _load_jobs_document(args.jobs)
+                    operation_id = enqueue_snapshot(outbox, store, jobs=_job_items(raw), job_id=args.job_id,
+                        target=adapter.target, from_application=args.from_application,
+                        expected_remote_hash=args.expected_remote_hash)
+                    report = {'ok': True, 'operation': 'sheet-sync.enqueue', 'operation_id': operation_id,
+                              'target': adapter.target}
+                else:
+                    result = outbox.deliver(adapter, adapter.target, max_items=args.max_items)
+                    report = {'ok': result['error'] is None, 'operation': 'sheet-sync.deliver', 'result': result}
+            if args.json:
+                _emit(report, as_json=True, stdout=stdout)
+            else:
+                print(f"{report['operation']}: {'ok' if report['ok'] else 'failed'}", file=stdout)
+            return 0 if report['ok'] else 1
+        if args.command == 'review-receipt':
+            from job_radar.review_receipts import ReviewReceiptStore
+
+            store = LocalTrackingStore(args.user_data.absolute())
+            if args.jobs.resolve() == store.path_for('review_receipts'):
+                raise ValueError('review snapshot must be separate from receipt state')
+            _validate_review_snapshot(args)
+            receipts = ReviewReceiptStore(store.path_for('review_receipts'))
+            asof = datetime.now(timezone.utc).isoformat()
+            if args.receipt_command == 'record':
+                result = receipts.record(args.job_id, args.jd_sha256, args.resume_sha256, args.reviewer,
+                    args.evidence, args.decision, args.reviewed_at, confirmed=args.confirm_reviewed, asof=asof)
+            else:
+                result = receipts.check(args.job_id, args.jd_sha256, args.resume_sha256, asof=asof)
+            _emit({'ok': True, 'operation': 'review-receipt.' + args.receipt_command, 'result': result},
+                  as_json=args.json, stdout=stdout)
+            return 0
         if args.command == "doctor":
             report = _doctor(args)
             _emit(report, as_json=args.json, stdout=stdout)
@@ -566,9 +661,13 @@ def main(
 
         if args.command == "scan":
             _validate_output_boundary(args.output, inputs=(args.catalog, args.checkpoint))
+            if args.health_output is not None:
+                _validate_output_boundary(args.health_output, inputs=(args.catalog, args.output, args.checkpoint))
             checkpoint_options = {}
             if args.checkpoint is not None or args.resume:
                 checkpoint_options = dict(checkpoint=args.checkpoint, resume=args.resume)
+            if args.health_output is not None:
+                checkpoint_options['health_output'] = args.health_output
             result = scan_runner(
                 load_catalog(args.catalog),
                 get_json,
@@ -589,6 +688,8 @@ def main(
                 "incomplete": result["incomplete"],
                 "mode": args.mode,
             }
+            if args.health_output is not None:
+                report['source_health_output'] = str(args.health_output.resolve())
             _emit(report, as_json=args.json, stdout=stdout)
             return 0
 
@@ -634,13 +735,16 @@ def main(
             return 0
 
         if args.command == "run":
-            inputs = (args.catalog, args.profile, args.aliases, args.checkpoint)
+            inputs = (args.catalog, args.profile, args.aliases, args.checkpoint, args.health_output)
             _validate_output_boundary(args.jobs_output, inputs=(*inputs, args.dashboard_output), user_data=args.user_data)
             _validate_output_boundary(args.dashboard_output, inputs=(*inputs, args.jobs_output), user_data=args.user_data)
             if args.run_manifest is not None:
                 _validate_output_boundary(args.run_manifest, inputs=(*inputs, args.jobs_output, args.dashboard_output), user_data=args.user_data)
+            if args.health_output is not None:
+                _validate_output_boundary(args.health_output, inputs=(args.catalog, args.profile, args.aliases,
+                    args.checkpoint, args.jobs_output, args.dashboard_output, args.run_manifest), user_data=args.user_data)
             active_scan_runner = (_in_process_scan_runner if injected_get_json and default_scan_runner
-                                  and args.checkpoint is None and not args.resume else scan_runner)
+                                  and args.checkpoint is None and not args.resume and args.health_output is None else scan_runner)
             reserved = [args.jobs_output, args.dashboard_output, args.catalog, args.profile, args.aliases]
             if args.checkpoint is not None:
                 checkpoint_path = args.checkpoint.resolve()
@@ -658,6 +762,9 @@ def main(
                     if args.checkpoint is not None or args.resume:
                         checkpoint_options = dict(checkpoint=args.checkpoint, resume=args.resume,
                                                   observed_on=args.observed_on, on_progress=run_receipt.scan_progress)
+                    if args.health_output is not None:
+                        checkpoint_options['health_output'] = args.health_output
+                        run_receipt.document['source_health_path'] = str(args.health_output.resolve())
                     scan_result = active_scan_runner(
                         load_catalog(args.catalog), get_json, mode=args.mode,
                         per_source_timeout=args.source_timeout, output=args.jobs_output,
@@ -697,6 +804,8 @@ def main(
                     'mode': 'ai_command' if args.ai_command else 'local_rules', 'review': workflow['review'],
                     'run_manifest': str(run_receipt.path.resolve()), 'stages': run_receipt.document['stages'],
                 }
+                if args.health_output is not None:
+                    report['source_health_output'] = str(args.health_output.resolve())
             _emit(report, as_json=args.json, stdout=stdout)
             if not args.json:
                 print('stages: ' + ', '.join(f'{name}={state}' for name, state in report['stages'].items()), file=stdout)
@@ -835,7 +944,7 @@ def main(
             return 0
 
         if args.command == "tracking":
-            store = LocalTrackingStore(args.user_data.resolve())
+            store = LocalTrackingStore(args.user_data.absolute())
             if args.tracking_command == "record-application":
                 with args.from_dashboard.open("rb") as handoff:
                     content = handoff.read(8 * 1024 * 1024 + 1)
