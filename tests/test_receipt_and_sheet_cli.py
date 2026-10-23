@@ -217,4 +217,3 @@ def test_cli_does_not_resolve_away_an_aliased_optional_user_data_root(tmp_path, 
     args[args.index('--user-data') + 1] = str(alias)
     assert invoke(args)[0] == 2
     assert list(root.iterdir()) == []
-
