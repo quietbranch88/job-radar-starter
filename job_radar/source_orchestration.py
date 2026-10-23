@@ -11,6 +11,7 @@ from datetime import date
 from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any, Callable
+from urllib.error import HTTPError, URLError
 
 from job_radar.adapters import (
     Job,
@@ -22,6 +23,7 @@ from job_radar.adapters import (
 from job_radar.catalog import Catalog
 from job_radar.local_state import writer_guard
 from job_radar.scan_checkpoint import ScanCheckpoint
+from job_radar.source_health import SourceHealth
 
 
 _FETCHERS = {
@@ -65,6 +67,15 @@ def _source_worker(
                 [replace(job, country=country) for job in fetched],
             )
         )
+    except HTTPError as error:
+        result_connection.send(("http_error", error.code))
+    except TimeoutError:
+        result_connection.send(("network_timeout", None))
+    except URLError as error:
+        kind = 'network_timeout' if isinstance(error.reason, TimeoutError) else 'network_error'
+        result_connection.send((kind, None))
+    except ConnectionError:
+        result_connection.send(("network_error", None))
     except SourcePayloadTooLarge:
         result_connection.send(("oversized", None))
     except (KeyError, TypeError, ValueError):
@@ -216,6 +227,7 @@ def scan_catalog_resilient(
     resume: bool = False,
     observed_on: str | None = None,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
+    health_output: Path | None = None,
 ) -> dict[str, Any]:
     if mode not in {"atomic", "best-effort"}:
         raise ValueError("mode must be atomic or best-effort")
@@ -243,11 +255,19 @@ def scan_catalog_resilient(
     if output.name.casefold().endswith('.guard'):
         raise ValueError('scan output must be separate from reserved guard files')
     companies = _enabled_companies(catalog)
+    if health_output is not None:
+        health_output = Path(health_output).resolve()
+        reserved = {output.resolve()}
+        if checkpoint is not None:
+            saved = Path(checkpoint).resolve()
+            reserved.update((saved, saved.with_name(saved.name + '.guard')))
+        if health_output in reserved or health_output.name.casefold().endswith('.guard'):
+            raise ValueError('health output must be separate from jobs, checkpoint and guards')
     observed = observed_on or date.today().isoformat()
     date.fromisoformat(observed)
     options = dict(mode=mode, per_source_timeout=per_source_timeout, output=output,
                    max_jobs_per_source=max_jobs_per_source, max_concurrency=max_concurrency,
-                   on_progress=on_progress)
+                   on_progress=on_progress, health_output=health_output)
     if checkpoint is not None:
         checkpoint = Path(checkpoint).resolve()
         checkpoint_guard = checkpoint.with_name(checkpoint.name + '.guard')
@@ -265,20 +285,26 @@ def scan_catalog_resilient(
 
 
 def _scan_companies(companies, get_json, *, checkpoint_state, observed_on, mode,
-                    per_source_timeout, output, max_jobs_per_source, max_concurrency, on_progress):
+                    per_source_timeout, output, max_jobs_per_source, max_concurrency, on_progress,
+                    health_output):
     context = multiprocessing.get_context("spawn")
     jobs: list[Job] = checkpoint_state.retained_jobs() if checkpoint_state else []
     failures: list[dict[str, str]] = []
     pending = deque(checkpoint_state.pending() if checkpoint_state else companies)
     workers: list[dict[str, Any]] = []
+    health = SourceHealth(health_output, companies, checkpoint=checkpoint_state) if health_output is not None else None
+    completed_normally = False
 
     try:
         while pending or workers:
             while pending and len(workers) < max_concurrency:
+                company = pending.popleft()
+                if health is not None:
+                    health.begin(company)
                 workers.append(
                     _start_worker(
                         context,
-                        pending.popleft(),
+                        company,
                         get_json,
                         max_jobs_per_source,
                     )
@@ -301,7 +327,20 @@ def _scan_companies(companies, get_json, *, checkpoint_state, observed_on, mode,
                             time.monotonic() + per_source_timeout
                         )
                         continue
-                    if kind == "oversized":
+                    http_status = payload if kind == 'http_error' and type(payload) is int and 100 <= payload <= 599 else None
+                    if http_status is not None:
+                        category = ('rate_limited' if http_status == 429 else 'access_denied' if http_status in (401, 403)
+                                    else 'not_found' if http_status == 404 else 'upstream_error' if http_status >= 500
+                                    else 'http_error')
+                        failures.append(_failure(worker['source_name'], worker['company_name'], category,
+                                                 f'official source returned HTTP {http_status}'))
+                    elif kind == 'network_timeout':
+                        failures.append(_failure(worker['source_name'], worker['company_name'], 'timeout',
+                                                 'official source connection timed out'))
+                    elif kind == 'network_error':
+                        failures.append(_failure(worker['source_name'], worker['company_name'], 'network_error',
+                                                 'official source connection failed'))
+                    elif kind == "oversized":
                         failures.append(
                             _failure(
                                 worker["source_name"],
@@ -352,6 +391,14 @@ def _scan_companies(companies, get_json, *, checkpoint_state, observed_on, mode,
                         if checkpoint_state is not None:
                             payload = checkpoint_state.complete(worker['company_scope'], payload)
                         jobs.extend(payload)
+                        if health is not None:
+                            fetched = None
+                            if checkpoint_state is not None:
+                                fetched = checkpoint_state.document['companies'][checkpoint_state.companies.index(worker['company_scope'])]['fetched_at']
+                            health.complete(worker['company_scope'], len(payload), fetched_at=fetched)
+                    if health is not None and len(failures) > failures_before:
+                        health_category = 'network_timeout' if kind == 'network_timeout' else failures[-1]['category']
+                        health.fail(worker['company_scope'], health_category, http_status=http_status)
                     if checkpoint_state is not None and len(failures) > failures_before:
                         checkpoint_state.fail(worker['company_scope'], failures[-1])
                     if checkpoint_state is not None and on_progress is not None:
@@ -377,6 +424,8 @@ def _scan_companies(companies, get_json, *, checkpoint_state, observed_on, mode,
                             ),
                         )
                     )
+                    if health is not None:
+                        health.fail(worker['company_scope'], failures[-1]['category'])
                     completed.append(worker)
                 elif not process.is_alive():
                     failures.append(
@@ -387,6 +436,8 @@ def _scan_companies(companies, get_json, *, checkpoint_state, observed_on, mode,
                             "source failed",
                         )
                     )
+                    if health is not None:
+                        health.fail(worker['company_scope'], failures[-1]['category'])
                     completed.append(worker)
                 if checkpoint_state is not None and len(failures) > failures_before:
                     checkpoint_state.fail(worker['company_scope'], failures[-1])
@@ -399,8 +450,13 @@ def _scan_companies(companies, get_json, *, checkpoint_state, observed_on, mode,
 
             if workers and not completed:
                 time.sleep(0.005)
+        completed_normally = True
     finally:
-        _close_workers(workers)
+        try:
+            _close_workers(workers)
+        finally:
+            if health is not None:
+                health.finish(interrupted=not completed_normally)
 
     failures.sort(
         key=lambda failure: (
