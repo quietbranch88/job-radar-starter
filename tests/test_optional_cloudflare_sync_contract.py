@@ -4,9 +4,6 @@ import json
 import re
 from pathlib import Path
 
-import pytest
-
-
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "optional-sync" / "cloudflare"
 
@@ -42,6 +39,7 @@ def test_optional_template_is_isolated_and_has_all_operator_files():
         name in dependencies
         for name in (
             "wrangler",
+            "@cloudflare/vitest-plugin",
             "@cloudflare/vitest-pool-workers",
             "@cloudflare/workers-types",
         )
@@ -91,16 +89,18 @@ def test_optional_package_pins_verified_worker_test_dependencies():
     assert package["scripts"]["test"] == "vitest run"
     assert package["scripts"]["dev"] == "wrangler dev --local"
     assert package["scripts"]["deploy"] == "wrangler deploy"
+    assert package["engines"] == {"node": "^22.12.0 || >=24.0.0"}
     assert package["devDependencies"] == {
-        "@cloudflare/vitest-pool-workers": "0.18.8",
-        "@cloudflare/workers-types": "5.20260722.1",
+        "@cloudflare/vitest-plugin": "1.4.7",
+        "@cloudflare/workers-types": "5.20261019.1",
         "typescript": "7.0.2",
-        "vitest": "4.1.11",
-        "wrangler": "4.114.0",
+        "vitest": "4.1.12",
+        "wrangler": "4.152.0",
     }
-    assert package["overrides"] == {
-        "miniflare": {"sharp": "0.35.4", "undici": "7.29.0"},
-    }
+    assert "overrides" not in package
+    config = _required(TEMPLATE / "vitest.config.ts")
+    assert 'from "@cloudflare/vitest-plugin"' in config
+    assert "@cloudflare/vitest-pool-workers" not in config
 
 
 def test_worker_source_contains_bounded_single_owner_security_contract():

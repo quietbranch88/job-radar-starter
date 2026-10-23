@@ -14,8 +14,15 @@ contract.
 
 ## Local use
 
+Use Node.js 22.12+ on the 22.x line, or Node.js 24 or later (CI uses 24),
+and the committed npm lockfile.
+The tests use the maintained `@cloudflare/vitest-plugin` and its declared
+Miniflare/workerd dependencies, without forced dependency overrides. The
+upstream Miniflare version is currently a prerelease; local test and dry-run
+results do not establish production deployment compatibility.
+
 ```powershell
-npm install
+npm ci
 npm test
 npx wrangler secret put SYNC_TOKEN
 npm run dev
