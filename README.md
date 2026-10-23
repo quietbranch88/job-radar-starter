@@ -60,6 +60,8 @@ The local profile may point to a resume, but built-in components do not open or 
 
 Your resume, preferences, application history, scan output, credentials, and browser status stay local by default.
 
+Applied is a browser marker, not proof of submission. The [local confirmation workflow](docs/operator-guide.md#confirm-a-submission-locally) records a verified application and rebuilds its metrics offline; no application is submitted by Job Radar.
+
 Do not commit real resumes, interview notes, salary records, API keys, or scan results.
 
 Optional AI scoring receives structured preferences and public job fields. It does not receive resume contents, resume paths, prior notes, risks, or application state. If your command calls a hosted model, review that provider's retention and deletion policy.
@@ -98,6 +100,14 @@ This project is independent and is not affiliated with any job board, ATS provid
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
+
+## Recovery and local evidence
+
+The local workflow preserves all scored observations while filtering the
+Dashboard/review projection. Opt-in company-level `--checkpoint` / `--resume`,
+offline `build-dashboard --profile`, and per-attempt stage receipts are described
+in the [operator guide](docs/operator-guide.md#6-preserve-observations-and-resume-a-company-walk).
+These are local capabilities, not automatic application submission or deployment.
 
 ## License
 

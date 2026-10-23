@@ -30,6 +30,7 @@ def _terms(job: Job) -> str:
             job.category,
             *job.tracks,
             *job.skills,
+            *job.jd_evidence,
         )
     ).casefold()
 

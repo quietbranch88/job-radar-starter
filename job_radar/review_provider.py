@@ -74,6 +74,9 @@ def _digest_job(job: Mapping[str, Any]) -> str:
             "tracks",
             "skills",
             "visa_supported",
+            "jd_evidence",
+            "jd_evidence_source",
+            "jd_hash",
         )
     }
     encoded = json.dumps(
@@ -101,7 +104,7 @@ def compact_review_jobs(jobs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any
                 title=str(job.get("title", "")),
             )
         explicit_evidence = job.get("jd_evidence", [])
-        if not isinstance(explicit_evidence, list) or not all(
+        if not isinstance(explicit_evidence, (list, tuple)) or not all(
             isinstance(value, str) for value in explicit_evidence
         ):
             raise ValueError("jd_evidence must be a list of strings")

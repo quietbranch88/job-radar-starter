@@ -6,6 +6,7 @@ import multiprocessing
 import os
 import signal
 import time
+from datetime import date
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
@@ -17,7 +18,7 @@ from job_radar.cli import main
 
 
 def fake_mixed_get_json(url: str):
-    if url.endswith("/healthy/jobs"):
+    if url.endswith("/healthy/jobs?content=true"):
         return {
             "jobs": [
                 {
@@ -28,7 +29,7 @@ def fake_mixed_get_json(url: str):
                 }
             ]
         }
-    if url.endswith("/duplicate/jobs"):
+    if url.endswith("/duplicate/jobs?content=true"):
         return {
             "jobs": [
                 {
@@ -39,7 +40,7 @@ def fake_mixed_get_json(url: str):
                 }
             ]
         }
-    if url.endswith("/broken/jobs"):
+    if url.endswith("/broken/jobs?content=true"):
         raise RuntimeError(
             "upstream rejected token=PRIVATE_TOKEN at C:\\Users\\Private\\source.py"
         )
@@ -47,7 +48,7 @@ def fake_mixed_get_json(url: str):
 
 
 def fake_hanging_get_json(url: str):
-    if url.endswith("/healthy/jobs"):
+    if url.endswith("/healthy/jobs?content=true"):
         return {
             "jobs": [
                 {
@@ -58,7 +59,7 @@ def fake_hanging_get_json(url: str):
                 }
             ]
         }
-    if url.endswith("/hanging/jobs"):
+    if url.endswith("/hanging/jobs?content=true"):
         time.sleep(30)
         return {"jobs": []}
     raise AssertionError(url)
@@ -398,12 +399,14 @@ def test_complete_scan_has_versioned_schema_and_no_failures(
 
     assert set(result) == {
         "contract_version",
+        "observed_on",
         "mode",
         "incomplete",
         "jobs",
         "failures",
     }
     assert result["contract_version"] == 1
+    assert result["observed_on"] == date.today().isoformat()
     assert result["mode"] == "atomic"
     assert result["incomplete"] is False
     assert result["failures"] == []

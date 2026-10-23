@@ -7,6 +7,7 @@ import tempfile
 import time
 from collections import deque
 from dataclasses import asdict, replace
+from datetime import date
 from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any, Callable
@@ -19,6 +20,8 @@ from job_radar.adapters import (
     fetch_lever,
 )
 from job_radar.catalog import Catalog
+from job_radar.local_state import writer_guard
+from job_radar.scan_checkpoint import ScanCheckpoint
 
 
 _FETCHERS = {
@@ -189,6 +192,7 @@ def _start_worker(
         raise
     child_connection.close()
     return {
+        "company_scope": company,
         "company_name": company_name,
         "source_name": source_name,
         "process": process,
@@ -208,6 +212,10 @@ def scan_catalog_resilient(
     output: Path,
     max_jobs_per_source: int = 10_000,
     max_concurrency: int = 4,
+    checkpoint: Path | None = None,
+    resume: bool = False,
+    observed_on: str | None = None,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     if mode not in {"atomic", "best-effort"}:
         raise ValueError("mode must be atomic or best-effort")
@@ -230,10 +238,38 @@ def scan_catalog_resilient(
     ):
         raise ValueError("max_concurrency must be a positive integer")
 
+    if resume and checkpoint is None:
+        raise ValueError('--resume requires --checkpoint')
+    if output.name.casefold().endswith('.guard'):
+        raise ValueError('scan output must be separate from reserved guard files')
+    companies = _enabled_companies(catalog)
+    observed = observed_on or date.today().isoformat()
+    date.fromisoformat(observed)
+    options = dict(mode=mode, per_source_timeout=per_source_timeout, output=output,
+                   max_jobs_per_source=max_jobs_per_source, max_concurrency=max_concurrency,
+                   on_progress=on_progress)
+    if checkpoint is not None:
+        checkpoint = Path(checkpoint).resolve()
+        checkpoint_guard = checkpoint.with_name(checkpoint.name + '.guard')
+        if output.resolve() in (checkpoint, checkpoint_guard):
+            raise ValueError('checkpoint, guard and scan output must be separate paths')
+        with writer_guard(checkpoint_guard):
+            state = ScanCheckpoint(checkpoint, companies, mode=mode, max_jobs=max_jobs_per_source,
+                                   observed_on=observed, resume=resume)
+            if on_progress is not None:
+                on_progress(state.progress())
+            return _scan_companies(companies, get_json, checkpoint_state=state,
+                                   observed_on=state.observed_on, **options)
+    return _scan_companies(companies, get_json, checkpoint_state=None,
+                           observed_on=observed, **options)
+
+
+def _scan_companies(companies, get_json, *, checkpoint_state, observed_on, mode,
+                    per_source_timeout, output, max_jobs_per_source, max_concurrency, on_progress):
     context = multiprocessing.get_context("spawn")
-    jobs: list[Job] = []
+    jobs: list[Job] = checkpoint_state.retained_jobs() if checkpoint_state else []
     failures: list[dict[str, str]] = []
-    pending = deque(_enabled_companies(catalog))
+    pending = deque(checkpoint_state.pending() if checkpoint_state else companies)
     workers: list[dict[str, Any]] = []
 
     try:
@@ -253,6 +289,7 @@ def scan_catalog_resilient(
             for worker in workers:
                 process = worker["process"]
                 connection = worker["connection"]
+                failures_before = len(failures)
                 if connection.poll():
                     try:
                         kind, payload = connection.recv()
@@ -312,7 +349,13 @@ def scan_catalog_resilient(
                             )
                         )
                     else:
+                        if checkpoint_state is not None:
+                            payload = checkpoint_state.complete(worker['company_scope'], payload)
                         jobs.extend(payload)
+                    if checkpoint_state is not None and len(failures) > failures_before:
+                        checkpoint_state.fail(worker['company_scope'], failures[-1])
+                    if checkpoint_state is not None and on_progress is not None:
+                        on_progress(checkpoint_state.progress())
                     completed.append(worker)
                     continue
 
@@ -345,6 +388,10 @@ def scan_catalog_resilient(
                         )
                     )
                     completed.append(worker)
+                if checkpoint_state is not None and len(failures) > failures_before:
+                    checkpoint_state.fail(worker['company_scope'], failures[-1])
+                    if on_progress is not None:
+                        on_progress(checkpoint_state.progress())
 
             for worker in completed:
                 _close_worker(worker)
@@ -371,6 +418,7 @@ def scan_catalog_resilient(
     )
     result = {
         "contract_version": 1,
+        "observed_on": observed_on,
         "mode": mode,
         "incomplete": bool(failures),
         "jobs": normalized_jobs if mode == "best-effort" or not failures else [],

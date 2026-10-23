@@ -28,6 +28,15 @@ above and then removes empty managed directories. It does not delete `scans/`,
 browser localStorage, dashboard exports, or other files outside the configured
 root.
 
+Explicitly confirmed applications also retain the submission time (or literal
+`unknown`), resume version, channel, confirmation time and a short confirmation
+reference in `tracking/applications.json`. Application records are retained until
+the operator deletes managed tracking data; no automatic expiry is added.
+Existing tracking exports include these fields and require separate deletion.
+Browser Applied markers do not create these records. Confirmation references are
+not included in provider requests, the Dashboard tracking projection or optional
+Cloudflare status sync. Keep references short and free of credentials.
+
 Review cache is pruned to 30 days and rejected audit history to 90 days by
 default. Both windows are locally configurable with positive
 `cache_retention_days` and `rejected_retention_days` values. Rescued rejection
@@ -57,3 +66,20 @@ party and receives the status contract described in
 [`external-data-contracts.md`](external-data-contracts.md). The operator is
 responsible for credentials, access control, retention, disclosure, deletion,
 and applicable law. This project is not legal advice.
+
+## Observation checkpoints and execution receipts
+
+Opt-in checkpoints contain public posting data, company-board scope, completion
+digests, safe failures and actual fetch timestamps. Run receipts contain local
+stage/progress metadata and error types. Neither contains resume contents,
+application confirmations, tokens or interview messages. They are local artifacts,
+normally under gitignored `scans/`; do not publish a custom checkpoint/output
+path or upload it as a review attachment. No additional third-party transmission
+is introduced by checkpointing or offline profile filtering.
+
+The operator retains checkpoints, receipts, exports and scans until explicitly
+removing them. Managed tracking deletion does not remove these files or browser
+storage. Persistent guard files must not be deleted while a writer is active.
+The 128 MiB checkpoint bound limits size, not retention time. Saved low-score
+observations remain available locally; Dashboard projection and configured
+review input include only eligible jobs.

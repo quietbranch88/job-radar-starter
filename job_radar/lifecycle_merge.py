@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Mapping
 
 from job_radar.domain.tracking import (
@@ -9,6 +9,7 @@ from job_radar.domain.tracking import (
     parse_iso_date_or_datetime,
     stable_job_id,
 )
+from job_radar.domain.jobs import validate_jd_evidence
 
 
 _SCAN_FIELDS = {
@@ -45,6 +46,7 @@ _LIFECYCLE_FIELDS = {
     "freshness",
     "legacy_status_keys",
 }
+_JD_FIELDS = {"jd_evidence", "jd_evidence_source", "jd_hash"}
 
 
 def _iso_date(value: object, field: str) -> date:
@@ -58,6 +60,19 @@ def _mapping(value: object, field: str) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError(f"{field} must be an object")
     return deepcopy(dict(value))
+
+
+def observation_as_of(observed_on: str, jobs: list[Mapping[str, Any]]) -> str:
+    """Keep the walk date separate from actual per-job UTC fetch dates."""
+    observed = _iso_date(observed_on, "observed_on")
+    today = datetime.now(timezone.utc).date()
+    for job in jobs:
+        if job.get("last_seen"):
+            seen = _iso_date(job["last_seen"], "last_seen")
+            if seen > today:
+                raise ValueError("job observation date cannot be in the future")
+            observed = max(observed, seen)
+    return observed.isoformat()
 
 
 def _validate_aliases(aliases: object) -> tuple[dict[str, str], dict[str, str]]:
@@ -84,7 +99,7 @@ def _validate_scan(scan_result: object) -> dict[str, Any]:
     scan = _mapping(scan_result, "scan_result")
     if scan.get("contract_version") != 1:
         raise ValueError("scan_result has unsupported contract version")
-    if set(scan) != {
+    if set(scan) - {"observed_on"} != {
         "contract_version",
         "mode",
         "incomplete",
@@ -123,13 +138,18 @@ def _validate_prior(prior_state: object) -> dict[str, Any]:
 
 
 def _validate_job(job: Mapping[str, Any]) -> dict[str, Any]:
-    unknown = set(job) - (_SCAN_FIELDS | _LIFECYCLE_FIELDS)
+    unknown = set(job) - (_SCAN_FIELDS | _LIFECYCLE_FIELDS | _JD_FIELDS)
     if unknown:
         raise ValueError(f"job has unsupported fields: {sorted(unknown)}")
     missing = _SCAN_FIELDS - set(job)
     if missing:
         raise ValueError(f"job has missing fields: {sorted(missing)}")
     normalized = deepcopy(dict(job))
+    if "last_seen" in normalized and not isinstance(normalized["last_seen"], str):
+        raise ValueError("job last_seen must be a string")
+    validate_jd_evidence(normalized)
+    if "jd_evidence" in normalized:
+        normalized["jd_evidence"] = list(normalized["jd_evidence"])
     for field in (
         "source",
         "external_id",
@@ -296,6 +316,9 @@ def merge_scan_state(
     incoming_by_id: dict[str, dict[str, Any]] = {}
     for raw_job in sorted(scan["jobs"], key=_provider_order):
         incoming = _validate_job(raw_job)
+        seen = _iso_date(incoming.get("last_seen") or observed_on, "last_seen")
+        if seen > observed:
+            raise ValueError("job observation date cannot be in the future")
         published = incoming["published_at"]
         if published:
             parsed_published = parse_iso_date_or_datetime(published)
@@ -304,19 +327,24 @@ def merge_scan_state(
                 if isinstance(parsed_published, datetime)
                 else parsed_published
             )
-            if published_date > observed:
+            if published_date > seen:
                 raise ValueError("published date cannot be in the future")
         stable_id = _stable_id(incoming, company_aliases, title_aliases)
-        incoming_by_id.setdefault(stable_id, incoming)
+        incoming["last_seen"] = seen.isoformat()
+        candidate = incoming_by_id.get(stable_id)
+        if candidate is None or candidate["last_seen"] < incoming["last_seen"]:
+            incoming_by_id[stable_id] = incoming
 
     failed_scope = _failure_scope(scan)
     merged: dict[str, dict[str, Any]] = {}
     for stable_id, incoming in incoming_by_id.items():
         previous = existing.get(stable_id)
+        if previous is not None and previous["last_seen"] > incoming["last_seen"]:
+            continue
         job = deepcopy(incoming)
         job["stable_id"] = stable_id
         if previous is None:
-            job["first_seen"] = observed.isoformat()
+            job["first_seen"] = incoming["last_seen"]
             job["legacy_status_keys"] = _legacy_keys(job)
         else:
             job["first_seen"] = previous["first_seen"]
@@ -325,8 +353,11 @@ def merge_scan_state(
             job["legacy_status_keys"] = sorted(
                 set(previous["legacy_status_keys"]) | set(_legacy_keys(job))
             )
-        job["last_seen"] = observed.isoformat()
-        job["freshness"] = "active"
+        job["last_seen"] = incoming["last_seen"]
+        job["freshness"] = _freshness(
+            job, observed, stale_after_days=stale_after_days,
+            expired_after_days=expired_after_days,
+        )
         merged[stable_id] = job
 
     for stable_id, previous in existing.items():

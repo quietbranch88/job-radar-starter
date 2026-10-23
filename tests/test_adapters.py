@@ -106,7 +106,7 @@ def test_official_adapters_use_documented_public_endpoints():
     assert fetch_lever("example", "Example", fake_get_json) == []
     assert fetch_ashby("example", "Example", fake_get_json) == []
     assert calls == [
-        "https://boards-api.greenhouse.io/v1/boards/example/jobs",
+        "https://boards-api.greenhouse.io/v1/boards/example/jobs?content=true",
         "https://api.lever.co/v0/postings/example?mode=json",
         "https://api.ashbyhq.com/posting-api/job-board/example",
     ]

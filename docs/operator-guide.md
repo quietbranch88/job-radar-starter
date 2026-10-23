@@ -91,6 +91,39 @@ follow-up, no-response review, promised-response follow-up, and offer
 deadlines. Funnel metrics and rejection-stage slices are derived from these
 records rather than entered separately.
 
+### Confirm a submission locally
+
+The Dashboard's Applied button records a browser marker, not evidence that an
+application was submitted. It does not create an application or update funnel
+metrics. After verifying the real submission, export Dashboard state and run:
+
+```powershell
+job-radar --json tracking record-application --from-dashboard user-data\job-radar-state.json --job-id "<stable-job-id-from-export>" --applied-at unknown --resume-version "backend-v2" --channel "official-site" --confirmation-evidence "Submission receipt checked locally" --confirmed-at "2026-10-23T00:05:00Z" --confirm-submitted
+job-radar build-dashboard --jobs scans\latest.json --user-data user-data --output dashboard\public\index.html
+```
+
+Move the downloaded export into your gitignored `user-data/` directory first.
+The selected stable ID must match a job in the existing local lifecycle store,
+and its exported marker must be Applied. The command uses that persisted job's
+identity, company and title, then calls the existing application upsert command.
+`--confirm-submitted` is an explicit operator assertion. Supply the actual
+submission time with a timezone, or the literal `unknown`; `--confirmed-at` is
+the separate time you verified the submission. Unknown submission time does not
+generate submission-age follow-ups. Resume version, channel and a short local
+confirmation reference are required; do not paste credentials into the reference.
+
+Replaying an identical confirmation returns the existing application, including
+later interview/offer status. A conflicting confirmation or an existing legacy
+application requires explicit reconciliation instead of overwriting history.
+Existing application/event APIs support metadata and stage changes. Corrections
+to a confirmed submission identity or time require explicit local reconciliation;
+this import does not rewrite them.
+Rebuild or reload the rebuilt Dashboard to see the persisted metrics and status.
+Persisted application statuses take precedence over stale browser markers and
+cannot be cleared with browser-only buttons. `build-dashboard --user-data` is
+offline: it projects tracking without fetching sources or refreshing scan dates.
+No HTTP write endpoint or application submission automation is added.
+
 ## 4. Build and use the dashboard
 
 Run `job-radar build-dashboard` against the normalized view model. The dashboard
@@ -110,3 +143,77 @@ Cloudflare sync is optional. If you enable it, configure your own Worker,
 SQLite-backed Durable Object,
 and bearer token; then verify GET, POST, and DELETE with the versioned status
 contract. Do not treat the template as a shared hosted service.
+
+## 6. Preserve observations and resume a company walk
+
+`run` saves every scored observation in its scan output and local lifecycle,
+including jobs below `matching.minimum_score`. Only Dashboard/review eligibility
+is filtered. A changed profile can therefore rebuild the saved observations
+offline without another source request:
+
+```powershell
+job-radar build-dashboard --jobs scans/latest.json --profile user-data/profile.yaml --user-data user-data --output dashboard/public/index.html
+```
+
+Omit `--profile` only when intentionally rendering the supplied document as-is.
+The offline profile option rescales local rules and filters display; it does not
+write observations, refresh dates, invoke an AI provider, or alter submissions.
+
+Checkpointing is opt-in for `scan` and `run`:
+
+```powershell
+job-radar --json run --mode best-effort --checkpoint scans/walk-2026-10-24.json
+job-radar --json run --mode best-effort --checkpoint scans/walk-2026-10-24.json --resume --source-timeout 60
+```
+
+A checkpoint represents the configured company boards, not a whole provider
+catalogue or page-level cursor. Each fully completed company, including an empty
+result, is saved before progressing. Resume reuses those results and retries
+failed/pending companies; changing retry timeout or concurrency is allowed.
+Company/source/board/country or job-limit changes invalidate the plan. Changing
+atomic/best-effort mode also requires a new checkpoint. Starting a new walk at an
+existing path, malformed state, duplicate fields or an invalid completion digest
+fails closed without deleting the old state. Use a different path for a fresh
+walk. `--resume` alone is invalid.
+
+Across calendar days, the resumed walk retains its original `observed_on`, with
+actual completed-company fetch timestamps recorded separately. Each job carries
+the UTC date of its company's completed fetch in `last_seen`; cached companies
+keep their earlier dates while newly successful companies use their actual
+retry day. The lifecycle evaluates the latest observed day without relabeling
+cached jobs. A posting published on the retry day is therefore valid, while a
+posting dated after its own observation remains invalid. Offline profile rebuilds
+change only scoring fields, preserving identity, evidence and observation dates.
+The local checkpoint format is v2; older experimental v1 files fail closed and
+are retained, not migrated or deleted. The public scan envelope remains v1.
+Replaying a completed checkpoint is not a fresh scan. Finish an outstanding walk before
+starting a newer lifecycle walk against the same local user-data; an older
+observation cannot overwrite newer lifecycle dates. Checkpoint storage is bounded
+to 128 MiB and the source's configured per-company job limit. A local OS guard
+allows one writer per checkpoint and remains on disk after release. It is not a
+distributed lock or a network-filesystem guarantee. Do not delete a live `.guard`
+file or use a guard as an output target.
+
+Output paths cannot alias their inputs/other outputs, use reserved `.guard`
+names, or replace managed `user-data/tracking/` and `user-data/review/` state.
+The CLI checks these boundaries before scanning/rendering. Explicit run receipt
+creation also uses its own OS guard so two different jobs-output paths cannot
+both own the same new receipt.
+
+## 7. Read execution receipts by stage
+
+Every `run` creates a distinct receipt under the jobs output's `run-manifests/`
+directory. `--run-manifest PATH` selects an explicit new path; an existing receipt
+is never overwritten. JSON and human-readable reports name the receipt. Each
+receipt separates scan, workflow, review and build, with sync `not_configured`
+and deployment `not_requested`. A normal return is `finished`, not a claim that
+all jobs are approved or that a release was deployed. A disabled provider is
+`review=not_configured`; a configured runner's completion is execution evidence,
+not a per-job/resume approval receipt.
+
+Failures preserve earlier completed stages and leave later stages pending. The
+receipt records safe error types, not raw upstream exceptions. An abrupt process
+exit may leave a stage `running`; inspect the checkpoint and resume explicitly.
+Only complete company reads are reusable, and an interrupted in-flight read is
+retried. Run output serialization protects one jobs-output path; it does not make
+independent commands sharing a user-data directory a multi-writer database.

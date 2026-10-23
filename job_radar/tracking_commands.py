@@ -4,7 +4,7 @@ import json
 from collections import Counter
 from collections.abc import Mapping
 from copy import deepcopy
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Any, Protocol
 
 from job_radar.domain.tracking import (
@@ -87,6 +87,8 @@ def _normalize_application(payload: Mapping[str, Any]) -> dict[str, Any]:
         "rejection_stage",
         "promised_response_date",
         "offer_deadline",
+        "confirmation_evidence",
+        "confirmed_at",
     }
     unknown = set(payload) - allowed
     if unknown:
@@ -97,9 +99,9 @@ def _normalize_application(payload: Mapping[str, Any]) -> dict[str, Any]:
     status = _required_string(payload, "status", 32).casefold()
     applied_at = _required_string(payload, "applied_at", 40)
     updated_at = _required_string(payload, "updated_at", 40)
-    applied = _aware_datetime(applied_at, "applied_at")
+    applied = None if applied_at == "unknown" else _aware_datetime(applied_at, "applied_at")
     updated = _aware_datetime(updated_at, "updated_at")
-    if updated < applied:
+    if applied is not None and updated < applied:
         raise ValueError("updated_at must not be before applied_at")
     application_id = payload.get("application_id")
     if application_id is None:
@@ -121,6 +123,14 @@ def _normalize_application(payload: Mapping[str, Any]) -> dict[str, Any]:
         "country": _optional_string(payload, "country", 32),
         "application_id": application_id,
     }
+    if "confirmation_evidence" in payload:
+        normalized["confirmation_evidence"] = _required_string(payload, "confirmation_evidence", 1000)
+    if "confirmed_at" in payload:
+        confirmed_at = _required_string(payload, "confirmed_at", 40)
+        confirmed = _aware_datetime(confirmed_at, "confirmed_at")
+        if confirmed > updated or (applied is not None and confirmed < applied):
+            raise ValueError("confirmed_at must be between submission and updated_at")
+        normalized["confirmed_at"] = confirmed_at
     for field in ("rejection_stage", "promised_response_date", "offer_deadline"):
         if field not in payload:
             continue
@@ -152,7 +162,8 @@ def upsert_application(
         transition_application(str(existing.get("status", "")), candidate["status"])
         candidate["application_id"] = existing["application_id"]
         candidate["job_id"] = existing["job_id"]
-        candidate["applied_at"] = existing["applied_at"]
+        if existing.get("status") != "interested":
+            candidate["applied_at"] = existing["applied_at"]
         if candidate == existing:
             return deepcopy(existing)
         document["items"][index] = candidate
@@ -161,6 +172,57 @@ def upsert_application(
     document["items"].sort(key=lambda item: str(item["application_id"]))
     repository.write("applications", document)
     return deepcopy(candidate)
+
+
+def record_confirmed_application(
+    repository: TrackingRepository,
+    *,
+    dashboard_state: Mapping[str, Any],
+    job_id: str,
+    applied_at: str,
+    resume_version: str,
+    channel: str,
+    confirmation_evidence: str,
+    confirmed_at: str,
+    confirm_submitted: bool,
+) -> dict[str, Any]:
+    """Confirm one submission locally; a browser marker is only a handoff candidate."""
+    if confirm_submitted is not True:
+        raise ValueError("--confirm-submitted is required; a browser marker is not proof of submission")
+    if not isinstance(dashboard_state, Mapping):
+        raise ValueError("dashboard export must be an object")
+    version = dashboard_state.get("contract_version", 1)
+    if isinstance(version, bool) or version != 1:
+        raise ValueError("dashboard export has unsupported contract version")
+    statuses = dashboard_state.get("statuses")
+    if not isinstance(statuses, Mapping) or statuses.get(job_id) != "applied":
+        raise ValueError("the selected job must have an Applied marker in the local export")
+    for name, value in (("resume_version", resume_version), ("channel", channel), ("confirmation_evidence", confirmation_evidence)):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{name} must not be empty")
+    jobs = _document(repository, "lifecycle")["items"]
+    matches = [job for job in jobs if job.get("stable_id") == job_id]
+    if len(matches) != 1:
+        raise ValueError("selected job must have exactly one persisted lifecycle identity; run the local workflow first")
+    job = matches[0]
+    candidate = _normalize_application({
+        "job_id": job_id, "company": job["company"], "title": job["title"],
+        "country": job.get("country", ""), "status": "applied", "applied_at": applied_at,
+        "updated_at": confirmed_at, "confirmed_at": confirmed_at,
+        "resume_version": resume_version, "channel": channel,
+        "confirmation_evidence": confirmation_evidence,
+    })
+    existing = [item for item in _document(repository, "applications")["items"] if item.get("job_id") == job_id]
+    if len(existing) > 1:
+        raise ValueError("application state contains duplicate identity")
+    if existing and existing[0].get("confirmation_evidence"):
+        for field in ("applied_at", "resume_version", "channel", "confirmation_evidence"):
+            if candidate[field] != existing[0].get(field):
+                raise ValueError("conflicting confirmed application replay; preserve the existing record for explicit correction")
+        return deepcopy(existing[0])
+    if existing and existing[0].get("status") != "interested":
+        raise ValueError("an existing application must be reconciled explicitly; a marker cannot overwrite its history")
+    return upsert_application(repository, candidate)
 
 
 def record_application_event(
@@ -291,9 +353,12 @@ def due_actions(
         status = str(application["status"])
         related = events_by_application.get(application_id, [])
         event_types = {str(event.get("event_type", "")).casefold() for event in related}
-        applied_at = _aware_datetime(application["applied_at"], "applied_at")
-        age = now - applied_at
-        if status == "applied" and "follow_up_sent" not in event_types:
+        applied_at = (
+            None if application["applied_at"] == "unknown"
+            else _aware_datetime(application["applied_at"], "applied_at")
+        )
+        age = now - applied_at if applied_at is not None else None
+        if status == "applied" and applied_at is not None and age is not None and "follow_up_sent" not in event_types:
             if timedelta(days=7) <= age <= timedelta(days=10):
                 actions.append(
                     {

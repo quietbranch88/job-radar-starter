@@ -47,7 +47,7 @@ matching:
     )
 
     def fake_get_json(url):
-        assert url == "https://boards-api.greenhouse.io/v1/boards/northstar/jobs"
+        assert url == "https://boards-api.greenhouse.io/v1/boards/northstar/jobs?content=true"
         return {
             "jobs": [
                 {

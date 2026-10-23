@@ -7,7 +7,7 @@ import signal
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from datetime import date
 from typing import Any, Protocol
 
@@ -19,7 +19,8 @@ from job_radar.ai_review import (
 from job_radar.application import score_jobs
 from job_radar.config import UserConfig
 from job_radar.domain.jobs import Job
-from job_radar.lifecycle_merge import merge_scan_state
+from job_radar.domain.tracking import stable_job_id
+from job_radar.lifecycle_merge import merge_scan_state, observation_as_of
 from job_radar.tracking_commands import build_metrics, due_actions
 from job_radar.windows_job import WindowsJob
 
@@ -240,6 +241,17 @@ def _dashboard_statuses(applications: Sequence[Mapping[str, Any]]) -> dict[str, 
     return dict(sorted(statuses.items()))
 
 
+def project_application_tracking(
+    repository: WorkflowRepository, *, as_of: str
+) -> dict[str, Any]:
+    """Project persisted decisions without scanning or recording a new observation."""
+    return {
+        "statuses": _dashboard_statuses(_document_items(repository, "applications")),
+        "metrics": build_metrics(repository),
+        "due_actions": due_actions(repository, as_of=as_of),
+    }
+
+
 def execute_public_workflow(
     *,
     scan_result: Mapping[str, Any],
@@ -252,8 +264,14 @@ def execute_public_workflow(
     per_call_timeout_seconds: float = DEFAULT_PER_CALL_TIMEOUT_SECONDS,
     total_deadline_seconds: float = DEFAULT_TOTAL_DEADLINE_SECONDS,
     max_fast_calls: int = DEFAULT_MAX_FAST_CALLS,
+    on_stage: Callable[[str, str], None] | None = None,
 ) -> dict[str, Any]:
-    """Run the public local-first workflow over explicit adapter boundaries."""
+    """Persist all observations and project only threshold-eligible jobs.
+
+    Counts distinguish current input observations (scanned) from the eligible
+    lifecycle projection, including retained history (published).
+    The optional stage observer runs in this parent process.
+    """
 
     date.fromisoformat(observed_on)
     repository.initialize()
@@ -275,10 +293,7 @@ def execute_public_workflow(
         scored = ai_scorer(jobs, config)
     else:
         scored = score_jobs(jobs, config)
-    published = [
-        job for job in scored if (job.score or 0) >= config.matching.minimum_score
-    ]
-    published.sort(
+    scored.sort(
         key=lambda job: (
             -(job.score or 0),
             job.company.casefold(),
@@ -287,9 +302,10 @@ def execute_public_workflow(
     )
     scored_scan = {
         "contract_version": 1,
+        "observed_on": observed_on,
         "mode": scan_result.get("mode"),
         "incomplete": scan_result.get("incomplete"),
-        "jobs": [asdict(job) for job in published],
+        "jobs": [asdict(job) for job in scored],
         "failures": list(scan_result.get("failures", [])),
     }
     for item in scored_scan["jobs"]:
@@ -297,9 +313,9 @@ def execute_public_workflow(
         item["skills"] = list(item["skills"])
 
     prior_jobs = _document_items(repository, "lifecycle")
-    application_statuses = _dashboard_statuses(
-        _document_items(repository, "applications")
-    )
+    as_of = observation_as_of(observed_on, scored_scan["jobs"])
+    tracking = project_application_tracking(repository, as_of=f"{as_of}T23:59:59Z")
+    application_statuses = tracking["statuses"]
     lifecycle = merge_scan_state(
         prior_state={
             "contract_version": 1,
@@ -307,38 +323,105 @@ def execute_public_workflow(
             "statuses": {},
         },
         scan_result=scored_scan,
-        observed_on=observed_on,
+        observed_on=as_of,
         aliases=aliases,
         statuses=application_statuses,
     )
+    # This workflow explicitly rescores observations. Refresh the derived fields
+    # that the generic lifecycle merge otherwise preserves as curated values.
+    scored_by_id: dict[str, dict[str, Any]] = {}
+    identity_aliases = {**aliases["company_aliases"], **aliases["title_aliases"]}
+    for item in sorted(
+        scored_scan["jobs"],
+        key=lambda item: tuple(
+            item[field].casefold()
+            for field in ("source", "external_id", "company", "title", "url")
+        ),
+    ):
+        job_id = stable_job_id(
+            source=item["source"], external_id=item["external_id"],
+            company=item["company"], title=item["title"], aliases=identity_aliases,
+        )
+        candidate = scored_by_id.get(job_id)
+        if candidate is None or (candidate.get("last_seen") or observed_on) < (item.get("last_seen") or observed_on):
+            scored_by_id[job_id] = item
+    for item in lifecycle["jobs"]:
+        current = scored_by_id.get(item["stable_id"])
+        if current is not None and (current.get("last_seen") or observed_on) < item["last_seen"]:
+            del scored_by_id[item["stable_id"]]
+    for item in lifecycle["jobs"]:
+        current = scored_by_id.get(item["stable_id"])
+        if current is not None:
+            for field in ("score", "summary", "risk", "tracks", "skills", "visa_supported"):
+                item[field] = current[field]
     repository.write(
         "lifecycle",
         {"contract_version": 1, "items": lifecycle["jobs"]},
     )
+    retained = [job for job in lifecycle["jobs"] if job["stable_id"] not in scored_by_id]
+    retained_scored = score_jobs(
+        [
+            Job(**{
+                field.name: job[field.name]
+                for field in fields(Job)
+                if field.name in job
+            })
+            for job in retained
+        ],
+        config,
+    )
+    retained_projection = {}
+    for job, rescored in zip(retained, retained_scored):
+        projected = {**job, **asdict(rescored)}
+        for field in ("tracks", "skills", "jd_evidence"):
+            projected[field] = list(projected[field])
+        retained_projection[job["stable_id"]] = projected
+    # Historical curation and observation dates stay persisted as-is. Only the
+    # projection uses current local preferences; it never calls an AI scorer.
+    projected_jobs = [
+        retained_projection.get(job["stable_id"], job) for job in lifecycle["jobs"]
+    ]
+    published = [
+        job for job in projected_jobs
+        if (job["score"] or 0) >= config.matching.minimum_score
+    ]
 
     if review_runner is None:
         review = _disabled_review()
         review_mode = "disabled"
+        if on_stage is not None:
+            on_stage("review", "not_configured")
     else:
-        review = run_review_runner_bounded(
-            review_runner,
-            lifecycle["jobs"],
-            observed_on=observed_on,
-            repository=repository,
-            per_call_timeout_seconds=per_call_timeout_seconds,
-            total_deadline_seconds=total_deadline_seconds,
-            max_fast_calls=max_fast_calls,
-        )
-        if not isinstance(review, dict) or review.get("contract_version") != 1:
-            raise ValueError("review runner must return a versioned review result")
+        if on_stage is not None:
+            on_stage("review", "running")
+        try:
+            review = run_review_runner_bounded(
+                review_runner,
+                published,
+                observed_on=as_of,
+                repository=repository,
+                per_call_timeout_seconds=per_call_timeout_seconds,
+                total_deadline_seconds=total_deadline_seconds,
+                max_fast_calls=max_fast_calls,
+            )
+            if not isinstance(review, dict) or review.get("contract_version") != 1:
+                raise ValueError("review runner must return a versioned review result")
+            if not isinstance(review.get("rejected", []), list) or not isinstance(
+                review.get("rejected_sample", []), list
+            ):
+                raise ValueError("review result rejected fields must be lists")
+            if not isinstance(review.get("failures", []), list):
+                raise ValueError("review result failures must be a list")
+        except BaseException:
+            if on_stage is not None:
+                on_stage("review", "failed")
+            raise
         review_mode = "configured"
+        if on_stage is not None:
+            on_stage("review", "partial" if review.get("failures") else "complete")
 
-    metrics = build_metrics(repository)
-    actions = due_actions(repository, as_of=f"{observed_on}T23:59:59Z")
     rejected = review.get("rejected", [])
     sampled = review.get("rejected_sample", [])
-    if not isinstance(rejected, list) or not isinstance(sampled, list):
-        raise ValueError("review result rejected fields must be lists")
     sampled_ids = [
         item["stable_id"]
         for item in sampled
@@ -354,15 +437,15 @@ def execute_public_workflow(
             "observed_on": observed_on,
             "failures": failures,
         },
-        "jobs": lifecycle["jobs"],
+        "jobs": published,
         "review": {
             "rejected": rejected,
             "sampled_rejected_ids": sampled_ids,
         },
         "tracking": {
             "statuses": lifecycle["statuses"],
-            "metrics": metrics,
-            "due_actions": actions,
+            "metrics": tracking["metrics"],
+            "due_actions": tracking["due_actions"],
         },
     }
     report = review.get("report", {})

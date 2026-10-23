@@ -112,3 +112,34 @@ test('large scan renders a bounded window and loads more without losing filters'
   await expect(page.getByTestId('job-card')).toHaveCount(1);
   await expect(page.locator('#visibleCount')).toHaveText('1');
 });
+
+test('an Applied marker needs explicit local confirmation and survives stale browser state after rebuild', async ({ page }) => {
+  await openDashboard(page, { width: 1440, height: 1000 });
+  const card = page.locator('[data-key="job_active"]');
+  await card.getByRole('button', { name: '✓ Applied', exact: true }).click();
+  await expect(card).toHaveAttribute('data-status', 'applied');
+  await expect(page.getByTestId('tracking-summary')).toContainText('4 tracked applications');
+  await expect(page.locator('#applicationRecordingHelp')).toContainText('not proof of submission');
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByTestId('export-state').click();
+  const handoff = path.join(root, 'test-results', 'application-handoff.json');
+  await (await downloadPromise).saveAs(handoff);
+  const rebuilt = path.join(root, 'test-results', 'application-confirmed.html');
+  execFileSync(python, [path.join(root, 'tests', 'browser', 'record_application_fixture.py'), handoff, rebuilt], {
+    cwd: root, env: fixtureEnvironment, stdio: 'inherit',
+  });
+  await page.evaluate(() => localStorage.setItem('job-radar-status', JSON.stringify({ job_active: 'skip' })));
+  await page.goto(pathToFileURL(rebuilt).href);
+  await expect(page.locator('[data-key="job_active"]')).toHaveAttribute('data-status', 'applied');
+  await expect(page.getByTestId('tracking-summary')).toContainText('1 tracked applications');
+  await expect(page.locator('#recommendations')).not.toContainText('Active Backend Engineer');
+  await page.evaluate(() => localStorage.setItem('job-radar-status', JSON.stringify({ job_active: 'skip' })));
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('job-radar-status')).job_active)).toBe('skip');
+  await page.reload();
+  await expect(page.locator('[data-key="job_active"]')).toHaveAttribute('data-status', 'applied');
+  await page.screenshot({ path: path.join(root, 'test-results', 'dashboard-evidence', 'confirmed-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('#applicationRecordingHelp')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await page.screenshot({ path: path.join(root, 'test-results', 'dashboard-evidence', 'confirmed-mobile-390.png'), fullPage: true });
+});
