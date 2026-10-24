@@ -87,7 +87,14 @@ def test_installed_javascript_parses_as_one_classic_script():
     parser.feed(install_optional_sync(_TEMPLATE))
     assert len(parser.scripts) == 1
     result = subprocess.run(
-        [node, "--check"], input=parser.scripts[0], text=True,
+        [node, "--check"], input=parser.scripts[0], text=True, encoding="utf-8",
         capture_output=True, timeout=15, check=False,
     )
     assert result.returncode == 0, result.stderr
+    # The syntax oracle must still reject malformed Unicode-bearing scripts.
+    invalid = subprocess.run(
+        [node, "--check"], input=parser.scripts[0] + "\nfunction broken( {",
+        text=True, encoding="utf-8", capture_output=True, timeout=15, check=False,
+    )
+    assert invalid.returncode != 0
+    assert "SyntaxError" in invalid.stderr
