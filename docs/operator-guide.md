@@ -247,6 +247,30 @@ the old approval; historical receipts remain. Future review timestamps are
 refused. A receipt is neither cryptographic reviewer authentication nor permission
 to apply. No application automation is added.
 
+Daily `run` and saved-scan rebuilds consume these receipts when you explicitly
+select the intended final resume digest:
+
+```powershell
+job-radar --json run --resume-sha256 RESUME_SHA256
+job-radar --json build-dashboard --jobs scans/latest.json --output dashboard/public/index.html --user-data user-data --resume-sha256 RESUME_SHA256
+```
+
+The same selected digest applies to the displayed candidate list; use a separate
+run/build for a different resume. There is no automatic resume-file discovery or
+upload. Without the option, operator review is **pending: resume not selected**,
+even if a provider assessment completed. Missing JD evidence, changed JD/resume,
+absent receipts and future decisions cannot appear approved. A matching reject
+remains rejected. The CLI uses current UTC time for applicability, not the scan
+observation date. Provider reports keep their existing meaning and output shape;
+separate `operator_review` counts appear in `run` JSON and its execution receipt.
+The local execution receipt also records the selected digest (or null) and the
+aware applicability cutoff so that counts remain attributable to that run.
+The Dashboard displays derived status and receipt ID only, never private reviewer
+identity/evidence. It is not a submission gate or permission to apply, and its
+browser Applied button is still not confirmed application evidence. Projection
+never writes or creates approval receipts. Corrupt receipt state stops the build
+without replacing the last good Dashboard.
+
 ## 10. Deliver a minimal snapshot to an owned Sheets tab
 
 This optional command is separate from `run` and Cloudflare. It does **not** map

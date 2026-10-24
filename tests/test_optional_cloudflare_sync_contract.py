@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "optional-sync" / "cloudflare"
@@ -97,7 +99,12 @@ def test_optional_package_pins_verified_worker_test_dependencies():
         "vitest": "4.1.12",
         "wrangler": "4.152.0",
     }
-    assert "overrides" not in package
+    # Explicit 2026-10-24 decision permits only these two exact advisory
+    # patches. Coupled Worker parents above remain pinned and independently tested.
+    assert package['overrides'] == {
+        'undici': '7.30.1',
+        'zod': '4.6.6',
+    }
     config = _required(TEMPLATE / "vitest.config.ts")
     assert 'from "@cloudflare/vitest-plugin"' in config
     assert "@cloudflare/vitest-pool-workers" not in config
@@ -165,9 +172,27 @@ def test_documentation_states_retention_deletion_abuse_and_no_saas_claim():
 
 
 def test_main_python_runtime_has_no_cloudflare_dependency():
-    python_sources = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in (ROOT / "job_radar").rglob("*.py")
-    ).casefold()
-    assert "cloudflare" not in python_sources
-    assert "wrangler" not in python_sources
+    # Vendor disclosure in an HTML string is not a Python SDK dependency.
+    # Check executable imports and declared runtime dependencies instead of prose.
+    forbidden = {"cloudflare", "wrangler", "miniflare", "pycloudflare", "cloudflare_api"}
+    for path in (ROOT / "job_radar").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            else:
+                continue
+            assert not {
+                module.split(".")[0].casefold() for module in modules
+            } & forbidden, path
+            if path.name == "dashboard_sync.py":
+                # The installer embeds browser code; it has no Python network path.
+                assert all(module == "__future__" for module in modules), path
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = project["project"].get("dependencies", [])
+    for dependency in dependencies:
+        name = re.split(r"[\s\[<>=!~;]", dependency, maxsplit=1)[0]
+        assert name.casefold().replace("-", "_") not in forbidden

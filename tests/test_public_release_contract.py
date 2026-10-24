@@ -517,10 +517,10 @@ def test_hosted_editable_install_uses_the_hash_locked_build_backend():
 
     assert "--no-build-isolation --no-deps -e ." in workflow
     build_requires = project["build-system"]["requires"]
-    assert build_requires == ["setuptools==83.0.0"]
+    assert build_requires == ["setuptools==84.1.0"]
     assert project["build-system"]["build-backend"] == "setuptools.build_meta"
     assert re.search(
-        r"setuptools==83\.0\.0\s*\\\s*\n\s*--hash=sha256:[0-9a-f]{64}",
+        r"setuptools==84\.1\.0\s*\\\s*\n\s*--hash=sha256:[0-9a-f]{64}",
         lock,
     )
 

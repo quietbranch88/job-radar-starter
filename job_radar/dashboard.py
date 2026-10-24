@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from job_radar.domain.jobs import Job
+from job_radar.dashboard_sync import install_optional_sync
 
 
 def _safe_url(value: str) -> str | None:
@@ -123,7 +124,7 @@ def _view_job_card(job: Mapping[str, object], rejected_ids: set[str]) -> str:
     )
     score_value = job.get("score")
     score = str(score_value) if isinstance(score_value, int) and not isinstance(score_value, bool) else "—"
-    details = []
+    details = [_operator_review_html(job)]
     if text("salary"):
         details.append(f'<p class="salary">{escape(text("salary"))}</p>')
     if text("summary"):
@@ -158,6 +159,17 @@ def _view_job_card(job: Mapping[str, object], rejected_ids: set[str]) -> str:
           </footer>
         </div>
       </article>"""
+
+
+def _operator_review_html(job: Mapping[str, object]) -> str:
+    review = job.get('operator_review')
+    review = review if isinstance(review, dict) else {}
+    approved = review.get('applicable') is True and review.get('approved') is True and review.get('decision') == 'approve'
+    rejected = review.get('applicable') is True and review.get('decision') == 'reject'
+    label = 'approved' if approved else 'rejected' if rejected else 'pending'
+    reason = str(review.get('reason', 'resume_not_selected')).replace('_', ' ')
+    detail = '' if label != 'pending' else f' · {escape(reason)}'
+    return f'<p class="tag" data-operator-review="{label}">Operator review: {label}{detail}</p>'
 
 
 _TEMPLATE = r"""<!doctype html>
@@ -252,7 +264,8 @@ __REJECTED_AUDIT__
     function renderRecommendations(){const picks=JOBS.filter(job=>!statusOf(job)).sort((a,b)=>(b.score??-1)-(a.score??-1)).slice(0,3),root=document.querySelector('#recommendations');root.innerHTML=picks.length?picks.map((job,index)=>`<article class="recommendation"><span class="rank">0${index+1} · ${esc(job.score??'—')} match</span><strong>${esc(job.title)}</strong><span>${esc(job.company)} · ${esc(job.location||job.country)}</span></article>`).join(''):'<div class="recommendation empty">No unhandled roles remain in this scan.</div>'}
     function rejectedAuditMarkup(item){return `<div class="rejected-item" data-review-state="rejected"><b>${esc(item.stable_id)}</b> · ${list(item.reason_codes).map(esc).join(', ')}</div>`}
     function renderRejectedAudit(){const root=document.querySelector('#rejectedAuditItems'),loadMore=document.querySelector('#loadMoreRejected');if(!root||!loadMore)return;const rendered=DASHBOARD.review.rejected.slice(0,rejectedRenderLimit);root.innerHTML=rendered.map(rejectedAuditMarkup).join('');const remaining=DASHBOARD.review.rejected.length-rendered.length;loadMore.hidden=remaining<=0;if(remaining>0){const count=Math.min(REJECTED_PAGE_SIZE,remaining);loadMore.textContent=`Load ${count} more rejected`;loadMore.setAttribute('aria-label',`Load ${count} more rejected jobs, ${remaining} remaining`)}}
-    function detailMarkup(job){return `${job.salary?`<p class="salary">${esc(job.salary)}</p>`:''}${job.summary?`<p class="why"><b>Why it may fit</b>${esc(job.summary)}</p>`:''}${job.risk?`<p class="risk"><b>Check before applying</b>${esc(job.risk)}</p>`:''}`}
+    function operatorReviewMarkup(job){const r=job.operator_review||{},approved=r.applicable===true&&r.approved===true&&r.decision==='approve',rejected=r.applicable===true&&r.decision==='reject',label=approved?'approved':rejected?'rejected':'pending',reason=String(r.reason||'resume_not_selected').replaceAll('_',' ');return `<p class="tag" data-operator-review="${label}">Operator review: ${label}${label==='pending'?' · '+esc(reason):''}</p>`}
+    function detailMarkup(job){return `${operatorReviewMarkup(job)}${job.salary?`<p class="salary">${esc(job.salary)}</p>`:''}${job.summary?`<p class="why"><b>Why it may fit</b>${esc(job.summary)}</p>`:''}${job.risk?`<p class="risk"><b>Check before applying</b>${esc(job.risk)}</p>`:''}`}
     function renderDeck(){const root=document.querySelector('#swipeDeck'),deck=pendingJobs();if(!deck.length){root.innerHTML='<div class="empty-state"><strong>Review queue complete</strong>Change a filter, clear a previous status, or import a new scan.</div>';return}const job=deck[0],url=safeUrl(job.url);root.innerHTML=`<article class="swipe-card" id="topSwipeCard" tabindex="-1"><span class="stamp like">INTERESTED</span><span class="stamp nope">HIDE</span><div class="score">${esc(job.score??'—')}</div><p class="eyebrow">${esc(job.source)} / ${esc(job.country||'other')}</p><h2>${esc(job.title)}</h2><p class="swipe-company">${esc(job.company)} · ${esc(job.location)}</p><div class="tags">${[job.category,...list(job.tracks),...list(job.skills)].filter(Boolean).map(value=>`<span class="tag">${esc(value)}</span>`).join('')}</div>${detailMarkup(job)}${url?`<p><a class="primary-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open official post ↗</a></p>`:''}</article><div class="deck-actions"><button type="button" data-deck="undo" aria-label="Undo">↩</button><button type="button" data-state="skip" aria-label="Hide">×</button><button type="button" data-state="dead" aria-label="Mark expired">!</button><button type="button" data-state="applied" aria-label="Mark applied">✓</button><button type="button" data-state="interested" aria-label="Mark interested">☆</button></div><p class="deck-meta">${deck.length} left · ← hide · → interested · ↑ applied</p>`;root.querySelectorAll('[data-state]').forEach(button=>button.addEventListener('click',()=>setStatus(job,button.dataset.state)));root.querySelector('[data-deck="undo"]').addEventListener('click',undo);attachSwipe(root.querySelector('#topSwipeCard'),job)}
     function attachSwipe(card,job){let start=0,delta=0,dragging=false;card.addEventListener('pointerdown',event=>{start=event.clientX;delta=0;dragging=true;card.setPointerCapture(event.pointerId)});card.addEventListener('pointermove',event=>{if(!dragging)return;delta=event.clientX-start;card.style.transform=`translateX(${delta}px) rotate(${delta/30}deg)`;card.querySelector('.stamp.like').style.opacity=Math.max(0,delta/100);card.querySelector('.stamp.nope').style.opacity=Math.max(0,-delta/100)});card.addEventListener('pointerup',()=>{dragging=false;if(Math.abs(delta)>110)setStatus(job,delta>0?'interested':'skip');else{card.style.transform='';card.querySelectorAll('.stamp').forEach(stamp=>stamp.style.opacity=0)}})}
     function undo(){const previous=undoStack.pop();if(!previous)return;if(previous.before)state[previous.key]=previous.before;else delete state[previous.key];saveState();renderAll()}
@@ -489,6 +502,7 @@ def render_dashboard_view_model(
         .replace("__TRACKING_SUMMARY__", _tracking_html(model["tracking"]))  # type: ignore[arg-type]
         .replace("__REJECTED_AUDIT__", _rejected_html(review))  # type: ignore[arg-type]
     )
+    html = install_optional_sync(html)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(html, encoding="utf-8")
 

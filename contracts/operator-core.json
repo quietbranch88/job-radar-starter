@@ -1,0 +1,10 @@
+{
+  "contract_version": 1,
+  "normalization": "lf-and-local-state-import-v1",
+  "modules": {
+    "local_state.py": "f39d90e636ef715bccadd2afbdf77a824509dd94b68787836b931d20b025503e",
+    "review_receipts.py": "bcde838ead893f9ab400b13197aa5c7f340b71fe17573378d9cb2f73d792582c",
+    "sheet_sync.py": "df44105cee6ddedcafd57b95e5534286290bf7182512315a2a715b28ce5f6958",
+    "sheets_transport.py": "f52618d492fe5f42a6e689d41097c68d556b98988257d5a3259f393d56840a0d"
+  }
+}
