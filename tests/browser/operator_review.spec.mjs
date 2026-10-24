@@ -1,11 +1,13 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test, expect } from '@playwright/test';
 
 const root = process.cwd();
 const fixture = path.join(root, 'test-results', 'operator-review.html');
-const python = process.env.PYTHON || path.join(root, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+const localPython = path.join(root, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+const python = process.env.PYTHON || (existsSync(localPython) ? localPython : (process.platform === 'win32' ? 'python' : 'python3'));
 test.beforeAll(() => execFileSync(python, [path.join(root, 'tests/browser/review_receipts_fixture.py'), fixture],
   { cwd: root, env: { ...process.env, PYTHONPATH: root }, stdio: 'inherit' }));
 
