@@ -34,6 +34,7 @@ from job_radar.source_orchestration import (
 )
 from job_radar.local_state import writer_guard
 from job_radar.run_receipt import RunReceipt
+from job_radar.review_projection import project_review_receipts, validate_resume_selection
 
 
 DEFAULT_CATALOG = Path("catalog/sources.yaml")
@@ -130,6 +131,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--max-source-concurrency", type=int, default=4)
     _add_checkpoint_arguments(run)
     run.add_argument('--run-manifest', type=Path, help='new per-attempt receipt; existing files are preserved')
+    run.add_argument('--resume-sha256', help='selected resume digest for read-only operator receipt projection; never opens a resume')
     command_group = run.add_mutually_exclusive_group()
     command_group.add_argument(
         "--ai-command",
@@ -153,6 +155,7 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--output", type=Path, required=True)
     build.add_argument("--user-data", type=Path, help="project local application tracking without scanning")
     build.add_argument('--profile', type=Path, help='rescore and filter the display from saved observations, without scanning')
+    build.add_argument('--resume-sha256', help='selected resume digest; requires --user-data; never submits an application')
 
     review = commands.add_parser(
         "review",
@@ -577,6 +580,18 @@ def _validate_review_snapshot(args) -> None:
         raise ValueError('review JD hash must match one unambiguous current job snapshot')
 
 
+def _selected_receipts(args):
+    validate_resume_selection(args.resume_sha256)
+    if args.resume_sha256 is None:
+        return None
+    if args.user_data is None:
+        raise ValueError('selected resume projection requires --user-data')
+    from job_radar.review_receipts import ReviewReceiptStore
+
+    store = LocalTrackingStore(args.user_data.absolute())
+    return ReviewReceiptStore(store.path_for('review_receipts'))
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -735,6 +750,7 @@ def main(
             return 0
 
         if args.command == "run":
+            receipt_checker = _selected_receipts(args)
             inputs = (args.catalog, args.profile, args.aliases, args.checkpoint, args.health_output)
             _validate_output_boundary(args.jobs_output, inputs=(*inputs, args.dashboard_output), user_data=args.user_data)
             _validate_output_boundary(args.dashboard_output, inputs=(*inputs, args.jobs_output), user_data=args.user_data)
@@ -777,6 +793,7 @@ def main(
                     observation = scan_result.get('observed_on', args.observed_on) if args.checkpoint is not None else args.observed_on
                     run_receipt.document['observed_on'] = observation
                     run_receipt.stage('workflow', 'running')
+                    review_asof = datetime.now(timezone.utc).isoformat()
                     workflow = execute_public_workflow(
                         scan_result=scan_result, config=load_user_config(args.profile),
                         repository=LocalTrackingStore(args.user_data.resolve()), observed_on=observation,
@@ -786,8 +803,14 @@ def main(
                         per_call_timeout_seconds=args.per_call_timeout,
                         total_deadline_seconds=args.total_review_deadline, max_fast_calls=args.max_fast_calls,
                         on_stage=run_receipt.stage,
+                        receipt_checker=receipt_checker, resume_sha256=args.resume_sha256,
+                        review_asof=review_asof,
                     )
                     _atomic_write_json(args.jobs_output, workflow['scan'])
+                    run_receipt.document['operator_review'] = workflow['operator_review']
+                    run_receipt.document['operator_review_context'] = {
+                        'resume_sha256': args.resume_sha256, 'asof': review_asof,
+                    }
                     run_receipt.stage('workflow', 'complete')
                     run_receipt.stage('build', 'running')
                     render_dashboard_view_model(workflow['view_model'], args.dashboard_output)
@@ -802,6 +825,7 @@ def main(
                     'counts': workflow['counts'], 'jobs_output': str(args.jobs_output.resolve()),
                     'dashboard_output': str(args.dashboard_output.resolve()),
                     'mode': 'ai_command' if args.ai_command else 'local_rules', 'review': workflow['review'],
+                    'operator_review': workflow['operator_review'],
                     'run_manifest': str(run_receipt.path.resolve()), 'stages': run_receipt.document['stages'],
                 }
                 if args.health_output is not None:
@@ -845,9 +869,10 @@ def main(
             return 0
 
         if args.command == "build-dashboard":
+            receipt_checker = _selected_receipts(args)
             _validate_output_boundary(args.output, inputs=(args.jobs, args.profile), user_data=args.user_data)
             kind, raw, jobs = _load_jobs_document(args.jobs)
-            if kind == "legacy" and args.user_data is None and args.profile is None:
+            if kind == "legacy" and args.user_data is None and args.profile is None and args.resume_sha256 is None:
                 render_dashboard(jobs, args.output)
             else:
                 model = _view_model_from_document(
@@ -868,6 +893,10 @@ def main(
                                                   for field in scoring_fields})
                                      for item in model['jobs']
                                      if (rescored[(str(item['source']), str(item['external_id']))]['score'] or 0) >= config.matching.minimum_score]
+                model['jobs'], _ = project_review_receipts(
+                    model['jobs'], checker=receipt_checker, resume_sha256=args.resume_sha256,
+                    asof=datetime.now(timezone.utc).isoformat(),
+                )
                 render_dashboard_view_model(model, args.output)
             _emit(
                 {

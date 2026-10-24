@@ -23,6 +23,7 @@ from job_radar.domain.tracking import stable_job_id
 from job_radar.lifecycle_merge import merge_scan_state, observation_as_of
 from job_radar.tracking_commands import build_metrics, due_actions
 from job_radar.windows_job import WindowsJob
+from job_radar.review_projection import ReceiptChecker, project_review_receipts, validate_resume_selection
 
 
 _TASKKILL_TIMEOUT_SECONDS = 1
@@ -265,7 +266,11 @@ def execute_public_workflow(
     total_deadline_seconds: float = DEFAULT_TOTAL_DEADLINE_SECONDS,
     max_fast_calls: int = DEFAULT_MAX_FAST_CALLS,
     on_stage: Callable[[str, str], None] | None = None,
+    receipt_checker: ReceiptChecker | None = None,
+    resume_sha256: str | None = None,
+    review_asof: str | None = None,
 ) -> dict[str, Any]:
+    validate_resume_selection(resume_sha256)
     """Persist all observations and project only threshold-eligible jobs.
 
     Counts distinguish current input observations (scanned) from the eligible
@@ -428,6 +433,9 @@ def execute_public_workflow(
         if isinstance(item, dict) and isinstance(item.get("stable_id"), str)
     ]
     failures = scored_scan["failures"]
+    published, receipt_counts = project_review_receipts(
+        published, checker=receipt_checker, resume_sha256=resume_sha256, asof=review_asof,
+    )
     view_model = {
         "contract_version": 1,
         "scan": {
@@ -460,6 +468,7 @@ def execute_public_workflow(
             "mode": review_mode,
             "provider_calls": provider_calls,
         },
+        "operator_review": receipt_counts,
         "view_model": view_model,
         "counts": {
             "scanned": len(jobs),

@@ -94,8 +94,10 @@ short evidence reference, decision and aware timestamp. They are operator
 attestations, not signatures or proof of independent human review. Receipt
 creation never opens/uploads a resume or contacts a reviewer/provider. References
 are not dereferenced; keep them non-sensitive. Receipts are retained without
-automatic expiry and included only in explicit local export, not the Dashboard,
-provider or Sheets payload.
+automatic expiry and included in explicit local export. Daily Dashboard projection
+with an explicitly selected resume digest includes only a derived decision,
+applicability reason and opaque receipt ID, not the private reviewer, evidence
+reference or full receipt. Provider and Sheets payloads do not gain receipt data.
 
 ## Observation checkpoints and execution receipts
 
