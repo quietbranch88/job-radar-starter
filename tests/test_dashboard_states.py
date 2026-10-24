@@ -252,7 +252,13 @@ def test_tracking_summary_due_actions_and_export_are_local_only(
     assert "job-radar-state.json" in html
     assert "statuses" in html
     assert "tracking" in html
-    assert "fetch(" not in html
+    # Optional manual status sync may fetch, but exporting application tracking
+    # remains a local Blob download and must never call that network boundary.
+    export_handler = next(line for line in html.splitlines()
+                          if "querySelector('#exportDashboardState').addEventListener" in line)
+    assert "fetch(" not in export_handler
+    assert "new Blob(" in export_handler
+    assert "tracking:DASHBOARD.tracking" in export_handler
     assert "XMLHttpRequest" not in html
     assert "/api/statuses" not in html
 

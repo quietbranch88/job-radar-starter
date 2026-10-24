@@ -9,4 +9,5 @@ scans/
 test-results/
 playwright-report/
 node_modules/
+.wrangler/
 .spec/parity-fixes-20261023/

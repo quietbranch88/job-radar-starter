@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from job_radar.domain.jobs import Job
+from job_radar.dashboard_sync import install_optional_sync
 
 
 def _safe_url(value: str) -> str | None:
@@ -501,6 +502,7 @@ def render_dashboard_view_model(
         .replace("__TRACKING_SUMMARY__", _tracking_html(model["tracking"]))  # type: ignore[arg-type]
         .replace("__REJECTED_AUDIT__", _rejected_html(review))  # type: ignore[arg-type]
     )
+    html = install_optional_sync(html)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(html, encoding="utf-8")
 
