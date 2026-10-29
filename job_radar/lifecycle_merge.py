@@ -62,8 +62,12 @@ def _mapping(value: object, field: str) -> dict[str, Any]:
     return deepcopy(dict(value))
 
 
-def observation_as_of(observed_on: str, jobs: list[Mapping[str, Any]]) -> str:
-    """Keep the walk date separate from actual per-job UTC fetch dates."""
+def observation_as_of(
+    observed_on: str, jobs: list[Mapping[str, Any]], *, latest_observed_on: str | None = None,
+) -> str:
+    """Keep the walk date separate from completed source and per-job fetch dates."""
+    if not isinstance(observed_on, str):
+        raise ValueError("observed_on must be an ISO date")
     observed = _iso_date(observed_on, "observed_on")
     today = datetime.now(timezone.utc).date()
     for job in jobs:
@@ -72,6 +76,13 @@ def observation_as_of(observed_on: str, jobs: list[Mapping[str, Any]]) -> str:
             if seen > today:
                 raise ValueError("job observation date cannot be in the future")
             observed = max(observed, seen)
+    if latest_observed_on is not None:
+        if not isinstance(latest_observed_on, str):
+            raise ValueError("latest_observed_on must be an ISO date")
+        latest = _iso_date(latest_observed_on, "latest_observed_on")
+        if latest < observed or latest > today:
+            raise ValueError("latest observation date must cover the walk and jobs without being in the future")
+        observed = latest
     return observed.isoformat()
 
 
@@ -99,7 +110,7 @@ def _validate_scan(scan_result: object) -> dict[str, Any]:
     scan = _mapping(scan_result, "scan_result")
     if scan.get("contract_version") != 1:
         raise ValueError("scan_result has unsupported contract version")
-    if set(scan) - {"observed_on"} != {
+    if set(scan) - {"observed_on", "latest_observed_on"} != {
         "contract_version",
         "mode",
         "incomplete",
@@ -119,6 +130,11 @@ def _validate_scan(scan_result: object) -> dict[str, Any]:
         isinstance(failure, dict) for failure in scan["failures"]
     ):
         raise ValueError("scan_result failures must be objects")
+    if "latest_observed_on" in scan:
+        if not isinstance(scan["latest_observed_on"], str):
+            raise ValueError("latest_observed_on must be an ISO date")
+        observation_as_of(scan.get("observed_on"), scan["jobs"],
+                          latest_observed_on=scan["latest_observed_on"])
     return scan
 
 

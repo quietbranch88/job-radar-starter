@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime, timezone
 from html import unescape
 from html.parser import HTMLParser
 from typing import Any, Callable
@@ -11,6 +12,71 @@ JsonGetter = Callable[[str], Any]
 
 class SourcePayloadTooLarge(ValueError):
     pass
+
+
+def _posting_items(payload: Any, *, envelope: bool, max_jobs: int | None) -> list[dict[str, Any]]:
+    if envelope:
+        if not isinstance(payload, dict) or "jobs" not in payload:
+            raise ValueError("source response must contain a jobs array")
+        items = payload["jobs"]
+    else:
+        items = payload
+    if not isinstance(items, list):
+        raise ValueError("source jobs must be an array")
+    # Keep the producer limit ahead of entry inspection and Job construction.
+    if max_jobs is not None and len(items) > max_jobs:
+        raise SourcePayloadTooLarge
+    if any(not isinstance(item, dict) for item in items):
+        raise ValueError("source job entries must be objects")
+    return items
+
+
+def _posting_id(item: dict[str, Any]) -> str:
+    value = item.get("id")
+    if type(value) not in (str, int) or not str(value).strip():
+        raise ValueError("source job id must be a nonempty string or integer")
+    return str(value)
+
+
+def _required_text(item: dict[str, Any], field: str) -> str:
+    value = item.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"source job {field} must be nonempty text")
+    return value
+
+
+def _optional_text(item: dict[str, Any], field: str) -> str:
+    value = item.get(field)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(f"source job {field} must be text")
+    return value
+
+
+def _nested_text(item: dict[str, Any], field: str, nested_field: str) -> str:
+    value = item.get(field)
+    if value is None:
+        return ""
+    if not isinstance(value, dict):
+        raise ValueError(f"source job {field} must be an object")
+    return _optional_text(value, nested_field)
+
+
+def _lever_created_at(item: dict[str, Any]) -> str:
+    if "createdAt" not in item or item["createdAt"] == "":
+        return ""
+    value = item["createdAt"]
+    try:
+        if type(value) in (int, float):
+            return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
+        if isinstance(value, str):
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.utcoffset() is not None:
+                return parsed.astimezone(timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        pass
+    raise ValueError("Lever createdAt must be epoch milliseconds or an aware ISO datetime")
 
 
 class _PostingText(HTMLParser):
@@ -79,18 +145,16 @@ def parse_greenhouse(
     *,
     max_jobs: int | None = None,
 ) -> list[Job]:
-    items = payload.get("jobs", ())
-    if max_jobs is not None and isinstance(items, list) and len(items) > max_jobs:
-        raise SourcePayloadTooLarge
+    items = _posting_items(payload, envelope=True, max_jobs=max_jobs)
     return [
         Job(
             source="greenhouse",
-            external_id=str(item["id"]),
+            external_id=_posting_id(item),
             company=company,
-            title=str(item["title"]),
-            location=str((item.get("location") or {}).get("name", "")),
-            url=str(item["absolute_url"]),
-            published_at=str(item.get("updated_at", "")),
+            title=_required_text(item, "title"),
+            location=_nested_text(item, "location", "name"),
+            url=_required_text(item, "absolute_url"),
+            published_at=_optional_text(item, "updated_at"),
             **_public_jd("greenhouse", content=item.get("content")),
         )
         for item in items
@@ -103,20 +167,19 @@ def parse_lever(
     *,
     max_jobs: int | None = None,
 ) -> list[Job]:
-    if max_jobs is not None and len(payload) > max_jobs:
-        raise SourcePayloadTooLarge
+    items = _posting_items(payload, envelope=False, max_jobs=max_jobs)
     return [
         Job(
             source="lever",
-            external_id=str(item["id"]),
+            external_id=_posting_id(item),
             company=company,
-            title=str(item["text"]),
-            location=str((item.get("categories") or {}).get("location", "")),
-            url=str(item["hostedUrl"]),
-            published_at=str(item.get("createdAt", "")),
+            title=_required_text(item, "text"),
+            location=_nested_text(item, "categories", "location"),
+            url=_required_text(item, "hostedUrl"),
+            published_at=_lever_created_at(item),
             **_lever_jd(item),
         )
-        for item in payload
+        for item in items
     ]
 
 
@@ -126,18 +189,19 @@ def parse_ashby(
     *,
     max_jobs: int | None = None,
 ) -> list[Job]:
-    items = payload.get("jobs", ())
-    if max_jobs is not None and isinstance(items, list) and len(items) > max_jobs:
-        raise SourcePayloadTooLarge
+    items = _posting_items(payload, envelope=True, max_jobs=max_jobs)
+    for item in items:
+        if "isListed" in item and type(item["isListed"]) is not bool:
+            raise ValueError("source job isListed must be boolean")
     return [
         Job(
             source="ashby",
-            external_id=str(item["id"]),
+            external_id=_posting_id(item),
             company=company,
-            title=str(item["title"]),
-            location=str(item.get("location", "")),
-            url=str(item.get("jobUrl") or item.get("applyUrl") or ""),
-            published_at=str(item.get("publishedAt", "")),
+            title=_required_text(item, "title"),
+            location=_optional_text(item, "location"),
+            url=_optional_text(item, "jobUrl") or _optional_text(item, "applyUrl"),
+            published_at=_optional_text(item, "publishedAt"),
             **_public_jd("ashby", **(
                 {"descriptionPlain": item.get("descriptionPlain")}
                 if item.get("descriptionPlain") else {"descriptionHtml": item.get("descriptionHtml")}

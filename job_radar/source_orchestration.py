@@ -480,6 +480,11 @@ def _scan_companies(companies, get_json, *, checkpoint_state, observed_on, mode,
         "jobs": normalized_jobs if mode == "best-effort" or not failures else [],
         "failures": failures,
     }
+    if checkpoint_state is not None:
+        represented_date = max([observed_on] + [job["last_seen"] for job in result["jobs"]])
+        latest_date = checkpoint_state.latest_observed_on
+        if latest_date > represented_date:
+            result["latest_observed_on"] = latest_date
     if mode == "atomic" and failures:
         raise AtomicSourceScanFailed(result)
     _atomic_write_json(output, result)
