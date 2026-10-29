@@ -30,6 +30,7 @@ def test_lever_normalizes_published_jobs():
     assert jobs[0].source == "lever"
     assert jobs[0].title == "Platform Engineer"
     assert jobs[0].location == "Remote - Canada"
+    assert jobs[0].published_at == "2026-07-13T00:00:00+00:00"
 
 
 def test_ashby_normalizes_published_jobs_and_skips_unlisted():
@@ -110,3 +111,96 @@ def test_official_adapters_use_documented_public_endpoints():
         "https://api.lever.co/v0/postings/example?mode=json",
         "https://api.ashbyhq.com/posting-api/job-board/example",
     ]
+
+
+@pytest.mark.parametrize("parser", [parse_greenhouse, parse_lever, parse_ashby])
+@pytest.mark.parametrize("payload", [None, {}, "", 0, False])
+def test_official_adapters_reject_malformed_roots(parser, payload):
+    with pytest.raises(ValueError):
+        parser(payload, "Example")
+
+
+@pytest.mark.parametrize("parser", [parse_greenhouse, parse_ashby])
+@pytest.mark.parametrize("jobs", [None, {}, "", ()])
+def test_object_envelopes_require_a_jobs_array(parser, jobs):
+    with pytest.raises(ValueError):
+        parser({"jobs": jobs}, "Example")
+
+
+@pytest.mark.parametrize("parser", [parse_greenhouse, parse_lever, parse_ashby])
+@pytest.mark.parametrize("entry", [None, [], "bad entry", 7, {}])
+def test_official_adapters_reject_malformed_entries(parser, entry):
+    payload = [entry] if parser is parse_lever else {"jobs": [entry]}
+    with pytest.raises(ValueError):
+        parser(payload, "Example")
+
+
+def _posting(parser):
+    if parser is parse_greenhouse:
+        return {"id": 7, "title": "Backend", "absolute_url": "https://example.test/7"}
+    if parser is parse_lever:
+        return {"id": "7", "text": "Backend", "hostedUrl": "https://example.test/7"}
+    return {"id": "7", "title": "Backend", "jobUrl": "https://example.test/7"}
+
+
+@pytest.mark.parametrize("parser", [parse_greenhouse, parse_lever, parse_ashby])
+@pytest.mark.parametrize("value", [None, True, [], ""])
+def test_job_identity_must_not_be_fabricated_from_malformed_values(parser, value):
+    posting = {**_posting(parser), "id": value}
+    payload = [posting] if parser is parse_lever else {"jobs": [posting]}
+    with pytest.raises(ValueError):
+        parser(payload, "Example")
+
+
+@pytest.mark.parametrize("parser", [parse_greenhouse, parse_lever, parse_ashby])
+@pytest.mark.parametrize("value", [None, False, [], ""])
+def test_required_title_must_be_nonempty_text(parser, value):
+    title_field = "text" if parser is parse_lever else "title"
+    posting = {**_posting(parser), title_field: value}
+    payload = [posting] if parser is parse_lever else {"jobs": [posting]}
+    with pytest.raises(ValueError):
+        parser(payload, "Example")
+
+
+@pytest.mark.parametrize("parser,payload", [
+    (parse_greenhouse, {"jobs": []}),
+    (parse_lever, []),
+    (parse_ashby, {"jobs": []}),
+])
+def test_official_empty_job_results_remain_valid(parser, payload):
+    assert parser(payload, "Example") == []
+
+
+class _NoIterationList(list):
+    def __iter__(self):
+        raise AssertionError("oversized data must not be inspected or normalized")
+
+
+@pytest.mark.parametrize("parser", [parse_greenhouse, parse_lever, parse_ashby])
+def test_size_limit_precedes_entry_validation_and_job_construction(parser):
+    entries = _NoIterationList([None, None])
+    payload = entries if parser is parse_lever else {"jobs": entries}
+    with pytest.raises(SourcePayloadTooLarge):
+        parser(payload, "Example", max_jobs=1)
+
+
+@pytest.mark.parametrize("value", [None, True, False, [], {}, "yesterday", "1783900800000",
+                                  "2026-07-13T00:00:00", float("nan"), float("inf"), 10**100])
+def test_lever_rejects_malformed_created_at(value):
+    with pytest.raises(ValueError):
+        parse_lever([{**_posting(parse_lever), "createdAt": value}], "Example")
+
+
+@pytest.mark.parametrize("value,expected", [
+    (1783900800123, "2026-07-13T00:00:00.123000+00:00"),
+    ("2026-07-13T00:00:00Z", "2026-07-13T00:00:00+00:00"),
+    ("2026-07-13T08:00:00+08:00", "2026-07-13T00:00:00+00:00"),
+    ("", ""),
+])
+def test_lever_dates_normalize_without_local_timezone_assumptions(value, expected):
+    job = parse_lever([{**_posting(parse_lever), "createdAt": value}], "Example")[0]
+    assert job.published_at == expected
+
+
+def test_lever_missing_created_at_remains_unknown():
+    assert parse_lever([_posting(parse_lever)], "Example")[0].published_at == ""
