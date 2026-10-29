@@ -298,13 +298,18 @@ def _load_jobs_document(path: Path) -> tuple[str, Any, list[Job]]:
     jobs = _load_jobs(path)
     if isinstance(raw, list):
         return "legacy", raw, jobs
-    if set(raw) - {"observed_on"} == {
+    if set(raw) - {"observed_on", "latest_observed_on"} == {
         "contract_version",
         "mode",
         "incomplete",
         "jobs",
         "failures",
     }:
+        if "latest_observed_on" in raw:
+            if not isinstance(raw["latest_observed_on"], str):
+                raise ValueError("latest_observed_on must be an ISO date")
+            observation_as_of(raw.get("observed_on"), raw["jobs"],
+                              latest_observed_on=raw["latest_observed_on"])
         return "scan", raw, jobs
     if set(raw) == {"contract_version", "jobs", "statuses"}:
         return "lifecycle", raw, jobs
@@ -382,7 +387,8 @@ def _view_model_from_document(kind: str, raw: Any) -> dict[str, Any]:
         lifecycle = merge_scan_state(
             prior_state={"contract_version": 1, "jobs": [], "statuses": {}},
             scan_result=raw,
-            observed_on=observation_as_of(observed_on, raw["jobs"]),
+            observed_on=observation_as_of(observed_on, raw["jobs"],
+                                          latest_observed_on=raw.get("latest_observed_on")),
             aliases={
                 "contract_version": 1,
                 "company_aliases": {},

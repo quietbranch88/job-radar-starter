@@ -85,6 +85,15 @@ class ScanCheckpoint:
     def observed_on(self) -> str:
         return self.document['observed_on']
 
+    @property
+    def latest_observed_on(self) -> str:
+        """Include successful empty boards without refreshing cached observations."""
+        return max(
+            [self.observed_on]
+            + [_timestamp(entry['fetched_at']).astimezone(timezone.utc).date().isoformat()
+               for entry in self.document['companies'] if entry['state'] == 'complete']
+        )
+
     def _validate(self, plan_hash: str) -> None:
         doc = self.document
         if (set(doc) != {'contract_version', 'plan_hash', 'observed_on', 'started_at', 'updated_at', 'companies'}

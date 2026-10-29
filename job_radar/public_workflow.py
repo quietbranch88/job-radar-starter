@@ -313,12 +313,15 @@ def execute_public_workflow(
         "jobs": [asdict(job) for job in scored],
         "failures": list(scan_result.get("failures", [])),
     }
+    if "latest_observed_on" in scan_result:
+        scored_scan["latest_observed_on"] = scan_result["latest_observed_on"]
     for item in scored_scan["jobs"]:
         item["tracks"] = list(item["tracks"])
         item["skills"] = list(item["skills"])
 
     prior_jobs = _document_items(repository, "lifecycle")
-    as_of = observation_as_of(observed_on, scored_scan["jobs"])
+    as_of = observation_as_of(observed_on, scored_scan["jobs"],
+                             latest_observed_on=scored_scan.get("latest_observed_on"))
     tracking = project_application_tracking(repository, as_of=f"{as_of}T23:59:59Z")
     application_statuses = tracking["statuses"]
     lifecycle = merge_scan_state(

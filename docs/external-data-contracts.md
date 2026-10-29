@@ -136,6 +136,14 @@ not redated when another company succeeds later. A lifecycle's evaluation date
 may advance beyond the original walk date, without changing either job's actual
 observation date. Future-dated postings are checked against their own observation.
 Legacy jobs without this optional field use the supplied observation date.
+Checkpoint-backed scan envelopes also carry optional ISO-date
+`latest_observed_on`, derived from completed-company `fetched_at` values even
+when a company returns no jobs. The producer emits it only when it advances
+beyond the walk and per-job dates. It must not precede the walk or any job's
+observation, or be in the future. Local scoring preserves it, and lifecycle and
+offline rendering use it as the evaluation date without redating jobs.
+Older version-1 envelopes without it retain their existing behavior. Consumers
+with strict older envelope validation must upgrade before reading the extension.
 Experimental checkpoint v1 is rejected and preserved; no implicit migration runs.
 
 Run receipts are separate local version-1 documents identified by `run_id` and

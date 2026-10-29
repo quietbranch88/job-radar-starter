@@ -181,7 +181,13 @@ actual completed-company fetch timestamps recorded separately. Each job carries
 the UTC date of its company's completed fetch in `last_seen`; cached companies
 keep their earlier dates while newly successful companies use their actual
 retry day. The lifecycle evaluates the latest observed day without relabeling
-cached jobs. A posting published on the retry day is therefore valid, while a
+cached jobs. Checkpoint-backed scans include optional `latest_observed_on` when
+the latest completed company-fetch date exceeds the walk and per-job dates,
+including successful empty boards. Scoring,
+the daily workflow and offline rendering preserve/use it; replaying completed
+companies never advances it to the replay day. Older scans without this field
+continue deriving the evaluation date from the walk and per-job dates.
+A posting published on the retry day is therefore valid, while a
 posting dated after its own observation remains invalid. Offline profile rebuilds
 change only scoring fields, preserving identity, evidence and observation dates.
 The local checkpoint format is v2; older experimental v1 files fail closed and
