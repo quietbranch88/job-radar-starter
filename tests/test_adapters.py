@@ -45,6 +45,20 @@ def test_ashby_normalizes_published_jobs_and_skips_unlisted():
     assert jobs[0].source == "ashby"
 
 
+@pytest.mark.parametrize("visibility", [None, 0, 1, "", "false", [], {}])
+def test_ashby_rejects_non_boolean_visibility_before_filtering(visibility):
+    with pytest.raises(ValueError, match="isListed"):
+        parse_ashby({"jobs": [{"isListed": visibility}]}, "Example")
+
+
+def test_ashby_explicitly_hidden_posting_does_not_require_listing_fields():
+    assert parse_ashby({"jobs": [{"isListed": False}]}, "Example") == []
+
+
+def test_ashby_missing_visibility_keeps_the_listing():
+    assert len(parse_ashby({"jobs": [{"id": "open", "title": "Backend"}]}, "Example")) == 1
+
+
 @pytest.mark.parametrize(
     ("parser", "payload"),
     [

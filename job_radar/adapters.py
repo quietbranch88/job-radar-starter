@@ -190,6 +190,9 @@ def parse_ashby(
     max_jobs: int | None = None,
 ) -> list[Job]:
     items = _posting_items(payload, envelope=True, max_jobs=max_jobs)
+    for item in items:
+        if "isListed" in item and type(item["isListed"]) is not bool:
+            raise ValueError("source job isListed must be boolean")
     return [
         Job(
             source="ashby",
