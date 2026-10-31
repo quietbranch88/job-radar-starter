@@ -72,33 +72,6 @@ party and receives the status contract described in
 responsible for credentials, access control, retention, disclosure, deletion,
 and applicable law. This project is not legal advice.
 
-Google Sheets delivery is a separate opt-in command, not automatic scan or
-Dashboard sync. Enqueue is local-only. `sheet-sync deliver --confirm-write`
-shares the allowlisted company/title/public URL/status and, only when explicitly
-projected from a confirmed application, submission time, resume version and short
-confirmation reference. No resume contents, email, personal notes or full JD are
-sent. The OAuth token is caller-provisioned via an environment variable, used in
-HTTPS headers only and never copied to the outbox or report. The project does
-not log in, discover, refresh or store Google credentials.
-
-The operator must own the dedicated target tab, control its sharing and review
-Google/account retention, regional processing and deletion policies. There is no
-automatic expiry: local outbox payloads and receipts remain until explicit local
-deletion, and the 500-item bound includes delivered history. Local deletion does
-not delete or revoke Google rows or separately exported files. Remote removal
-must be done separately by the owner; this CLI has no remote delete/share API.
-Blocked conflicts require explicit reconciliation, never silent overwrite.
-
-Review approval receipts contain supplied job/JD/resume hashes, reviewer identity,
-short evidence reference, decision and aware timestamp. They are operator
-attestations, not signatures or proof of independent human review. Receipt
-creation never opens/uploads a resume or contacts a reviewer/provider. References
-are not dereferenced; keep them non-sensitive. Receipts are retained without
-automatic expiry and included in explicit local export. Daily Dashboard projection
-with an explicitly selected resume digest includes only a derived decision,
-applicability reason and opaque receipt ID, not the private reviewer, evidence
-reference or full receipt. Provider and Sheets payloads do not gain receipt data.
-
 ## Observation checkpoints and execution receipts
 
 Opt-in checkpoints contain public posting data, company-board scope, completion

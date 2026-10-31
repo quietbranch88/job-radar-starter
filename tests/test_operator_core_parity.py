@@ -30,32 +30,28 @@ class OperatorCoreParityTests(unittest.TestCase):
         self.assertTrue(report["ok"], report)
         self.assertFalse(report["peer_checked"])
 
-    def test_cross_layout_comparison_allows_only_documented_import_difference(self):
+    def test_peer_layout_matches_local_state(self):
         with tempfile.TemporaryDirectory() as directory:
             peer = Path(directory) / "peer"
-            target = self.clone(peer, Path("job-scan") / "operator_state")
-            for name in ("review_receipts.py", "sheet_sync.py"):
-                path = target / name
-                path.write_text(path.read_text(encoding="utf-8").replace(
-                    "from job_radar.local_state import ", "from operator_state.local_state import "),
-                    encoding="utf-8")
+            self.clone(peer, Path("job-scan") / "operator_state")
             report = CHECKER.check(ROOT, peer)
             self.assertTrue(report["ok"], report)
             self.assertTrue(report["peer_checked"])
+            self.assertTrue(report["modules"]["local_state.py"]["matches_peer"])
 
-    def test_reject_tie_break_mutation_is_detected_without_changing_oracle(self):
+    def test_local_state_mutation_is_detected_without_changing_oracle(self):
         with tempfile.TemporaryDirectory() as directory:
             peer = Path(directory) / "peer"
             target = self.clone(peer, Path("job-scan") / "operator_state")
-            path = target / "review_receipts.py"
+            path = target / "local_state.py"
             original = path.read_text(encoding="utf-8")
-            guard = "item['decision'] == 'reject'"
+            guard = "local state contains duplicate fields"
             self.assertIn(guard, original)
             self.assertTrue(CHECKER.check(ROOT, peer)["ok"])
-            path.write_text(original.replace(guard, "item['decision'] == 'approve'", 1), encoding="utf-8")
+            path.write_text(original.replace(guard, "local state contains repeated fields", 1), encoding="utf-8")
             report = CHECKER.check(ROOT, peer)
             self.assertFalse(report["ok"])
-            self.assertFalse(report["modules"]["review_receipts.py"]["matches_peer"])
+            self.assertFalse(report["modules"]["local_state.py"]["matches_peer"])
             path.write_text(original, encoding="utf-8")
             self.assertTrue(CHECKER.check(ROOT, peer)["ok"])
 

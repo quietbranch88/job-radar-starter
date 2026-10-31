@@ -2,14 +2,10 @@ from __future__ import annotations
 
 import json
 import os
-import stat
 import tempfile
 from collections.abc import Callable
-from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
-
-from job_radar.local_state import writer_guard
 
 
 _STATE_PATHS = {
@@ -21,10 +17,6 @@ _STATE_PATHS = {
     "company_facts": Path("review") / "company-facts.json",
 }
 _EXPORT_KINDS = ("applications", "events", "lifecycle", "rejected")
-_OPTIONAL_STATE_PATHS = {
-    "sheet_outbox": Path("tracking") / "sheets-outbox.json",
-    "review_receipts": Path("review") / "receipts.json",
-}
 _EMPTY_DOCUMENT = {"contract_version": 1, "items": []}
 _APPLICATION_EVENT_JOURNAL = (
     Path("tracking") / ".application-event.journal.json"
@@ -55,45 +47,18 @@ class LocalTrackingStore:
         supplied = Path(root)
         if not supplied.is_absolute():
             raise ValueError("user-data root must be an absolute path without traversal")
-        self._lexical_root = supplied
         self.root = supplied.resolve(strict=False)
         self._replace_file = replace_file
 
     def path_for(self, kind: str) -> Path:
-        paths = {**_STATE_PATHS, **_OPTIONAL_STATE_PATHS}
-        if kind not in paths:
+        if kind not in _STATE_PATHS:
             raise ValueError(f"unsupported state kind: {kind}")
-        if kind in _OPTIONAL_STATE_PATHS:
-            path = self._lexical_root / paths[kind]
-            suffix = '.lock' if kind == 'sheet_outbox' else '.guard'
-            self._validate_optional_path(path, suffix)
-        else:
-            path = (self.root / paths[kind]).resolve(strict=False)
+        path = (self.root / _STATE_PATHS[kind]).resolve(strict=False)
         if not self._is_within_root(path):
             raise ValueError(f"state kind escapes user-data root: {kind}")
         return path
 
-    @staticmethod
-    def _validate_optional_path(path: Path, suffix: str) -> None:
-        if '..' in path.parts or path.drive.startswith('\\\\'):
-            raise ValueError('optional managed path must be local without traversal')
-        guard = path.with_name(path.name + suffix)
-        for candidate in (path, guard, *path.parents):
-            try:
-                info = candidate.lstat()
-            except FileNotFoundError:
-                continue
-            if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
-                raise ValueError('optional managed path cannot contain links or junctions')
-            if candidate in (path, guard):
-                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-                    raise ValueError('optional managed state and guard must be unaliased regular files')
-            elif not stat.S_ISDIR(info.st_mode):
-                raise ValueError('optional managed parent must be a directory')
-
     def initialize(self) -> dict[str, Path]:
-        for kind in _OPTIONAL_STATE_PATHS:
-            self.path_for(kind)
         self._recover_pending_application_event()
         paths = {kind: self.path_for(kind) for kind in _STATE_PATHS}
         for path in paths.values():
@@ -158,42 +123,25 @@ class LocalTrackingStore:
         journal_path.unlink()
 
     def export_to(self, destination: Path | str) -> Path:
-        for kind in _OPTIONAL_STATE_PATHS:
-            self.path_for(kind)
         target = Path(destination).resolve(strict=False)
         if self._is_within_root(target):
             raise ValueError("export destination must be outside managed user-data")
         payload = {
             "contract_version": 1,
-            "state": {kind: self.read(kind) for kind in (*_EXPORT_KINDS, *_OPTIONAL_STATE_PATHS)
-                      if kind in _EXPORT_KINDS or self.path_for(kind).exists()},
+            "state": {kind: self.read(kind) for kind in _EXPORT_KINDS},
         }
         self._atomic_write(target, payload)
         return target
 
     def delete_tracking_data(self) -> dict[str, Path]:
-        for kind in _OPTIONAL_STATE_PATHS:
-            self.path_for(kind)
         self._recover_pending_application_event()
         removed: dict[str, Path] = {}
-        optional_guards = {}
-        for kind in _OPTIONAL_STATE_PATHS:
+        for kind in _STATE_PATHS:
             path = self.path_for(kind)
-            suffix = '.lock' if kind == 'sheet_outbox' else '.guard'
-            guard = path.with_name(path.name + suffix)
-            if path.exists() or guard.exists():
-                optional_guards[kind] = guard
-        with ExitStack() as guards:
-            for guard in optional_guards.values():
-                guards.enter_context(writer_guard(guard))
-            # A newly created optional writer outside this snapshot is not ours
-            # to remove. A default-only deletion creates no optional guard files.
-            for kind in (*_STATE_PATHS, *optional_guards):
-                path = self.path_for(kind)
-                if not path.exists():
-                    continue
-                path.unlink()
-                removed[kind] = path
+            if not path.exists():
+                continue
+            path.unlink()
+            removed[kind] = path
         self._remove_empty_managed_directories()
         return removed
 

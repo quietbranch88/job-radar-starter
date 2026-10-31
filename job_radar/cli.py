@@ -33,7 +33,6 @@ from job_radar.source_orchestration import (
 )
 from job_radar.local_state import writer_guard
 from job_radar.run_receipt import RunReceipt
-from job_radar.review_projection import project_review_receipts, validate_resume_selection
 
 
 DEFAULT_CATALOG = Path("catalog/sources.yaml")
@@ -142,7 +141,6 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--max-source-concurrency", type=int, default=4)
     _add_checkpoint_arguments(run)
     run.add_argument('--run-manifest', type=Path, help='new per-attempt receipt; existing files are preserved')
-    run.add_argument('--resume-sha256', help='selected resume digest for read-only operator receipt projection; never opens a resume')
     run.add_argument('--install-sync', action='store_true', help='embed the optional Cloudflare status client')
     command_group = run.add_mutually_exclusive_group()
     command_group.add_argument(
@@ -167,7 +165,6 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--output", type=Path, required=True)
     build.add_argument("--user-data", type=Path, help="project local application tracking without scanning")
     build.add_argument('--profile', type=Path, help='rescore and filter the display from saved observations, without scanning')
-    build.add_argument('--resume-sha256', help='selected resume digest; requires --user-data; never submits an application')
     build.add_argument('--install-sync', action='store_true', help='embed the optional Cloudflare status client')
 
     review = commands.add_parser(
@@ -214,38 +211,6 @@ def _parser() -> argparse.ArgumentParser:
     recording.add_argument("--confirmation-evidence", required=True)
     recording.add_argument("--confirmed-at", required=True, help="ISO datetime with timezone when the submission was confirmed")
     recording.add_argument("--confirm-submitted", action="store_true")
-
-    receipts = commands.add_parser('review-receipt', help='explicit local attestation bound to JD and resume hashes; never submits applications')
-    receipt_commands = receipts.add_subparsers(dest='receipt_command', required=True)
-    for name in ('record', 'check'):
-        receipt = receipt_commands.add_parser(name)
-        receipt.add_argument('--user-data', type=Path, default=DEFAULT_USER_DATA)
-        receipt.add_argument('--jobs', type=Path, required=True)
-        receipt.add_argument('--job-id', required=True)
-        receipt.add_argument('--jd-sha256', required=True)
-        receipt.add_argument('--resume-sha256', required=True, help='digest supplied by the operator; resume files are never opened')
-        if name == 'record':
-            receipt.add_argument('--reviewer', required=True)
-            receipt.add_argument('--evidence', required=True)
-            receipt.add_argument('--decision', choices=('approve', 'reject'), required=True)
-            receipt.add_argument('--reviewed-at', required=True)
-            receipt.add_argument('--confirm-reviewed', action='store_true')
-    sync = commands.add_parser('sheet-sync', help='opt-in dedicated-tab delivery; never submits applications')
-    sync_commands = sync.add_subparsers(dest='sync_command', required=True)
-    for name in ('enqueue', 'status', 'deliver'):
-        item = sync_commands.add_parser(name)
-        item.add_argument('--user-data', type=Path, default=DEFAULT_USER_DATA)
-        if name != 'status':
-            item.add_argument('--spreadsheet-id', required=True)
-            item.add_argument('--tab', required=True)
-        if name == 'enqueue':
-            item.add_argument('--jobs', type=Path, required=True)
-            item.add_argument('--job-id', required=True)
-            item.add_argument('--from-application', action='store_true', help='use explicitly confirmed local application evidence, never browser status')
-            item.add_argument('--expected-remote-hash', help='known previous acknowledged payload hash for an update')
-        if name == 'deliver':
-            item.add_argument('--confirm-write', action='store_true', help='authorize minimal metadata sharing with Google on this dedicated target')
-            item.add_argument('--max-items', type=int, default=5)
     return parser
 
 
@@ -746,29 +711,6 @@ def _validate_output_boundary(output: Path, *, inputs=(), user_data: Path | None
             raise ValueError('output cannot replace managed tracking or review state')
 
 
-def _validate_review_snapshot(args) -> None:
-    _kind, raw, _jobs = _load_jobs_document(args.jobs)
-    matches = {
-        item.get('jd_hash', '') for item in _job_items(raw)
-        if (item.get('stable_id') or stable_job_id(source=item['source'], external_id=item['external_id'],
-            company=item['company'], title=item['title'])) == args.job_id
-    }
-    if matches != {args.jd_sha256} or not args.jd_sha256:
-        raise ValueError('review JD hash must match one unambiguous current job snapshot')
-
-
-def _selected_receipts(args):
-    validate_resume_selection(args.resume_sha256)
-    if args.resume_sha256 is None:
-        return None
-    if args.user_data is None:
-        raise ValueError('selected resume projection requires --user-data')
-    from job_radar.review_receipts import ReviewReceiptStore
-
-    store = LocalTrackingStore(args.user_data.absolute())
-    return ReviewReceiptStore(store.path_for('review_receipts'))
-
-
 def main(
     argv: list[str] | None = None,
     *,
@@ -776,7 +718,6 @@ def main(
     command_runner=subprocess.run,
     scan_runner=None,
     review_runner=None,
-    sheet_transport=None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
@@ -792,56 +733,6 @@ def main(
             return scan_catalog_resilient(catalog, transport, inline=inline, **kwargs)
     run_receipt: RunReceipt | None = None
     try:
-        if args.command == 'sheet-sync':
-            from job_radar.sheet_sync import GoogleSheetsAdapter, SheetOutbox
-
-            store = LocalTrackingStore(args.user_data.absolute())
-            outbox = SheetOutbox(store.path_for('sheet_outbox'))
-            if args.sync_command == 'status':
-                report = {'ok': True, 'operation': 'sheet-sync.status', 'result': outbox.status()}
-            else:
-                if args.sync_command == 'deliver' and not args.confirm_write:
-                    raise ValueError('Sheets delivery requires explicit --confirm-write; local deletion will not delete Google copies')
-                transport = sheet_transport
-                if args.sync_command == 'deliver' and transport is None:
-                    from job_radar.sheets_transport import OAuthSheetsTransport
-                    transport = OAuthSheetsTransport()
-                adapter = GoogleSheetsAdapter(args.spreadsheet_id, args.tab, transport)
-                if args.sync_command == 'enqueue':
-                    from job_radar.sheet_commands import enqueue_snapshot
-                    if args.jobs.resolve() == outbox.path.resolve():
-                        raise ValueError('job snapshot must be separate from outbox state')
-                    _kind, raw, _jobs = _load_jobs_document(args.jobs)
-                    operation_id = enqueue_snapshot(outbox, store, jobs=_job_items(raw), job_id=args.job_id,
-                        target=adapter.target, from_application=args.from_application,
-                        expected_remote_hash=args.expected_remote_hash)
-                    report = {'ok': True, 'operation': 'sheet-sync.enqueue', 'operation_id': operation_id,
-                              'target': adapter.target}
-                else:
-                    result = outbox.deliver(adapter, adapter.target, max_items=args.max_items)
-                    report = {'ok': result['error'] is None, 'operation': 'sheet-sync.deliver', 'result': result}
-            if args.json:
-                _emit(report, as_json=True, stdout=stdout)
-            else:
-                print(f"{report['operation']}: {'ok' if report['ok'] else 'failed'}", file=stdout)
-            return 0 if report['ok'] else 1
-        if args.command == 'review-receipt':
-            from job_radar.review_receipts import ReviewReceiptStore
-
-            store = LocalTrackingStore(args.user_data.absolute())
-            if args.jobs.resolve() == store.path_for('review_receipts'):
-                raise ValueError('review snapshot must be separate from receipt state')
-            _validate_review_snapshot(args)
-            receipts = ReviewReceiptStore(store.path_for('review_receipts'))
-            asof = datetime.now(timezone.utc).isoformat()
-            if args.receipt_command == 'record':
-                result = receipts.record(args.job_id, args.jd_sha256, args.resume_sha256, args.reviewer,
-                    args.evidence, args.decision, args.reviewed_at, confirmed=args.confirm_reviewed, asof=asof)
-            else:
-                result = receipts.check(args.job_id, args.jd_sha256, args.resume_sha256, asof=asof)
-            _emit({'ok': True, 'operation': 'review-receipt.' + args.receipt_command, 'result': result},
-                  as_json=args.json, stdout=stdout)
-            return 0
         if args.command == "init":
             report = _init_local_files(args)
             if args.json:
@@ -940,7 +831,6 @@ def main(
             return 0
 
         if args.command == "run":
-            receipt_checker = _selected_receipts(args)
             inputs = (args.catalog, args.profile, args.aliases, args.checkpoint, args.health_output)
             _validate_output_boundary(args.jobs_output, inputs=(*inputs, args.dashboard_output), user_data=args.user_data)
             _validate_output_boundary(args.dashboard_output, inputs=(*inputs, args.jobs_output), user_data=args.user_data)
@@ -994,7 +884,6 @@ def main(
                     observation = scan_result.get('observed_on', args.observed_on) if args.checkpoint is not None else args.observed_on
                     run_receipt.document['observed_on'] = observation
                     run_receipt.stage('workflow', 'running')
-                    review_asof = datetime.now(timezone.utc).isoformat()
                     workflow = execute_public_workflow(
                         scan_result=scan_result, config=load_user_config(args.profile),
                         repository=LocalTrackingStore(args.user_data.resolve()), observed_on=observation,
@@ -1004,14 +893,8 @@ def main(
                         per_call_timeout_seconds=args.per_call_timeout,
                         total_deadline_seconds=args.total_review_deadline, max_fast_calls=args.max_fast_calls,
                         on_stage=run_receipt.stage,
-                        receipt_checker=receipt_checker, resume_sha256=args.resume_sha256,
-                        review_asof=review_asof,
                     )
                     _atomic_write_json(args.jobs_output, workflow['scan'])
-                    run_receipt.document['operator_review'] = workflow['operator_review']
-                    run_receipt.document['operator_review_context'] = {
-                        'resume_sha256': args.resume_sha256, 'asof': review_asof,
-                    }
                     run_receipt.stage('workflow', 'complete')
                     run_receipt.stage('build', 'running')
                     render_dashboard_view_model(
@@ -1028,7 +911,6 @@ def main(
                     'counts': workflow['counts'], 'jobs_output': str(args.jobs_output.resolve()),
                     'dashboard_output': str(args.dashboard_output.resolve()),
                     'mode': 'ai_command' if args.ai_command else 'local_rules', 'review': workflow['review'],
-                    'operator_review': workflow['operator_review'],
                     'run_manifest': str(run_receipt.path.resolve()), 'stages': run_receipt.document['stages'],
                 }
                 if args.health_output is not None:
@@ -1072,10 +954,9 @@ def main(
             return 0
 
         if args.command == "build-dashboard":
-            receipt_checker = _selected_receipts(args)
             _validate_output_boundary(args.output, inputs=(args.jobs, args.profile), user_data=args.user_data)
             kind, raw, jobs = _load_jobs_document(args.jobs)
-            if kind == "legacy" and args.user_data is None and args.profile is None and args.resume_sha256 is None:
+            if kind == "legacy" and args.user_data is None and args.profile is None:
                 render_dashboard(jobs, args.output)
             else:
                 model = _view_model_from_document(
@@ -1095,10 +976,6 @@ def main(
                                                   for field in SCORING_FIELDS})
                                      for item in model['jobs']
                                      if (rescored[(str(item['source']), str(item['external_id']))]['score'] or 0) >= config.matching.minimum_score]
-                model['jobs'], _ = project_review_receipts(
-                    model['jobs'], checker=receipt_checker, resume_sha256=args.resume_sha256,
-                    asof=datetime.now(timezone.utc).isoformat(),
-                )
                 render_dashboard_view_model(model, args.output, install_sync=args.install_sync)
             _emit(
                 {

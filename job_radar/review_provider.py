@@ -170,7 +170,6 @@ class ConfiguredExternalReviewRunner:
             jobs=compact_review_jobs(jobs),
             repository=repository,
             fast_provider=provider,
-            strong_provider=None,
             config={
                 "contract_version": 1,
                 "minimum_fit": 1,
