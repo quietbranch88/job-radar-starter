@@ -7,6 +7,7 @@ from typing import Any
 from job_radar.adapters import fetch_ashby, fetch_greenhouse, fetch_lever
 from job_radar.catalog import Catalog
 from job_radar.domain.jobs import Job
+from job_radar.posting_country import posting_country
 
 
 _FETCHERS = {
@@ -29,6 +30,8 @@ def scan_catalog(catalog: Catalog, get_json: Callable[[str], Any]) -> list[Job]:
             raise RuntimeError(
                 f"{company_name} ({company.source}) scan failed: {error}"
             ) from error
-        country = company.countries[0] if len(company.countries) == 1 else ""
-        jobs.extend(replace(job, country=country) for job in fetched)
+        jobs.extend(
+            replace(job, country=posting_country(company.countries, job.location))
+            for job in fetched
+        )
     return jobs

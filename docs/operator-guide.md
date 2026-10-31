@@ -141,7 +141,7 @@ and rejection data, plus existing optional Sheets outbox/review receipts, outsid
 rejected, review cache, company-fact files and optional outbox/receipts. Exports, scans, and browser
 localStorage require separate deletion.
 
-Cloudflare sync is optional. If you enable it, configure your own Worker,
+Cloudflare sync is optional and stays off the generated page unless `run` or `build-dashboard` is passed `--install-sync`. If you enable it, configure your own Worker,
 SQLite-backed Durable Object,
 and bearer token; then verify GET, POST, and DELETE with the versioned status
 contract. Do not treat the template as a shared hosted service.

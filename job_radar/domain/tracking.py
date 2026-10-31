@@ -25,6 +25,21 @@ _APPLICATION_STATUSES = {
     "withdrawn",
 }
 _LEGACY_STATUSES = _APPLICATION_STATUSES | {"skip", "dead"}
+_DASHBOARD_MARKERS = {"interested", "applied", "skip", "dead"}
+
+
+def dashboard_marker(status: str) -> str:
+    """Fold application states onto the four browser markers."""
+    normalized = status.casefold()
+    if normalized == "hidden":
+        return "skip"
+    if normalized in _DASHBOARD_MARKERS:
+        return normalized
+    if normalized in {"interview", "offer", "accepted"}:
+        return "applied"
+    if normalized in {"rejected", "withdrawn"}:
+        return "skip"
+    raise ValueError(f"unsupported status: {status}")
 _TERMINAL_STATUSES = {"accepted", "rejected", "withdrawn"}
 _ALLOWED_TRANSITIONS = {
     "interested": {"interested", "applied", "rejected", "withdrawn"},

@@ -14,7 +14,7 @@ from typing import Any, TextIO
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from job_radar.application import score_jobs
+from job_radar.application import SCORING_FIELDS, score_jobs
 from job_radar.catalog import Catalog, load_catalog
 from job_radar.config import load_user_config
 from job_radar.domain.jobs import Job
@@ -23,7 +23,6 @@ from job_radar.data.tracking_store import LocalTrackingStore
 from job_radar.lifecycle_merge import merge_scan_state, observation_as_of
 from job_radar.job_output import write_jobs_json
 from job_radar.legacy_scoring import LegacyCommandScorer, score_jobs_with_command
-from job_radar.official_sources import scan_catalog
 from job_radar.public_workflow import execute_public_workflow, project_application_tracking, run_review_runner_bounded
 from job_radar.review_provider import ConfiguredExternalReviewRunner
 from job_radar.domain.tracking import stable_job_id
@@ -144,6 +143,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_checkpoint_arguments(run)
     run.add_argument('--run-manifest', type=Path, help='new per-attempt receipt; existing files are preserved')
     run.add_argument('--resume-sha256', help='selected resume digest for read-only operator receipt projection; never opens a resume')
+    run.add_argument('--install-sync', action='store_true', help='embed the optional Cloudflare status client')
     command_group = run.add_mutually_exclusive_group()
     command_group.add_argument(
         "--ai-command",
@@ -168,6 +168,7 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--user-data", type=Path, help="project local application tracking without scanning")
     build.add_argument('--profile', type=Path, help='rescore and filter the display from saved observations, without scanning')
     build.add_argument('--resume-sha256', help='selected resume digest; requires --user-data; never submits an application')
+    build.add_argument('--install-sync', action='store_true', help='embed the optional Cloudflare status client')
 
     review = commands.add_parser(
         "review",
@@ -354,29 +355,6 @@ def _empty_tracking() -> dict[str, Any]:
         },
         "due_actions": [],
     }
-
-
-def _in_process_scan_runner(
-    catalog: Catalog,
-    get_json,
-    *,
-    mode: str,
-    per_source_timeout: float,
-    output: Path,
-    max_concurrency: int,
-) -> dict[str, Any]:
-    del per_source_timeout, max_concurrency
-    jobs = scan_catalog(catalog, get_json)
-    result = {
-        "contract_version": 1,
-        "observed_on": date.today().isoformat(),
-        "mode": mode,
-        "incomplete": False,
-        "jobs": [asdict(job) for job in jobs],
-        "failures": [],
-    }
-    _atomic_write_json(output, result)
-    return result
 
 
 def _view_model_from_document(kind: str, raw: Any) -> dict[str, Any]:
@@ -809,7 +787,9 @@ def main(
     get_json = get_json or http_get_json
     default_scan_runner = scan_runner is None
     if scan_runner is None:
-        scan_runner = scan_catalog_resilient
+        def scan_runner(catalog, transport, **kwargs):
+            inline = kwargs.pop("inline", False)
+            return scan_catalog_resilient(catalog, transport, inline=inline, **kwargs)
     run_receipt: RunReceipt | None = None
     try:
         if args.command == 'sheet-sync':
@@ -969,8 +949,6 @@ def main(
             if args.health_output is not None:
                 _validate_output_boundary(args.health_output, inputs=(args.catalog, args.profile, args.aliases,
                     args.checkpoint, args.jobs_output, args.dashboard_output, args.run_manifest), user_data=args.user_data)
-            active_scan_runner = (_in_process_scan_runner if injected_get_json and default_scan_runner
-                                  and args.checkpoint is None and not args.resume and args.health_output is None else scan_runner)
             reserved = [args.jobs_output, args.dashboard_output, args.catalog, args.profile, args.aliases]
             if args.checkpoint is not None:
                 checkpoint_path = args.checkpoint.resolve()
@@ -991,10 +969,23 @@ def main(
                     if args.health_output is not None:
                         checkpoint_options['health_output'] = args.health_output
                         run_receipt.document['source_health_path'] = str(args.health_output.resolve())
-                    scan_result = active_scan_runner(
-                        load_catalog(args.catalog), get_json, mode=args.mode,
-                        per_source_timeout=args.source_timeout, output=args.jobs_output,
-                        max_concurrency=args.max_source_concurrency, **checkpoint_options,
+                    scan_options = dict(
+                        mode=args.mode,
+                        per_source_timeout=args.source_timeout,
+                        output=args.jobs_output,
+                        max_concurrency=args.max_source_concurrency,
+                        **checkpoint_options,
+                    )
+                    if (
+                        injected_get_json
+                        and default_scan_runner
+                        and args.checkpoint is None
+                        and not args.resume
+                        and args.health_output is None
+                    ):
+                        scan_options["inline"] = True
+                    scan_result = scan_runner(
+                        load_catalog(args.catalog), get_json, **scan_options,
                     )
                     run_receipt.stage('scan', 'partial' if scan_result['incomplete'] else 'complete')
                     aliases = json.loads(args.aliases.read_text(encoding='utf-8')) if args.aliases.exists() else {
@@ -1023,7 +1014,9 @@ def main(
                     }
                     run_receipt.stage('workflow', 'complete')
                     run_receipt.stage('build', 'running')
-                    render_dashboard_view_model(workflow['view_model'], args.dashboard_output)
+                    render_dashboard_view_model(
+                        workflow['view_model'], args.dashboard_output, install_sync=args.install_sync,
+                    )
                     run_receipt.stage('build', 'complete')
                     run_receipt.finish()
                 except BaseException as error:
@@ -1098,16 +1091,15 @@ def main(
                 if args.profile is not None:
                     config = load_user_config(args.profile)
                     rescored = {(job.source, job.external_id): asdict(job) for job in score_jobs(jobs, config)}
-                    scoring_fields = ('score', 'summary', 'risk', 'tracks', 'skills', 'visa_supported')
                     model['jobs'] = [dict(item, **{field: rescored[(str(item['source']), str(item['external_id']))][field]
-                                                  for field in scoring_fields})
+                                                  for field in SCORING_FIELDS})
                                      for item in model['jobs']
                                      if (rescored[(str(item['source']), str(item['external_id']))]['score'] or 0) >= config.matching.minimum_score]
                 model['jobs'], _ = project_review_receipts(
                     model['jobs'], checker=receipt_checker, resume_sha256=args.resume_sha256,
                     asof=datetime.now(timezone.utc).isoformat(),
                 )
-                render_dashboard_view_model(model, args.output)
+                render_dashboard_view_model(model, args.output, install_sync=args.install_sync)
             _emit(
                 {
                     "ok": True,

@@ -16,10 +16,10 @@ from job_radar.ai_review import (
     DEFAULT_PER_CALL_TIMEOUT_SECONDS,
     DEFAULT_TOTAL_DEADLINE_SECONDS,
 )
-from job_radar.application import score_jobs
+from job_radar.application import SCORING_FIELDS, score_jobs
 from job_radar.config import UserConfig
 from job_radar.domain.jobs import Job
-from job_radar.domain.tracking import stable_job_id
+from job_radar.domain.tracking import dashboard_marker, stable_job_id
 from job_radar.lifecycle_merge import merge_scan_state, observation_as_of
 from job_radar.tracking_commands import build_metrics, due_actions
 from job_radar.windows_job import WindowsJob
@@ -232,13 +232,10 @@ def _dashboard_statuses(applications: Sequence[Mapping[str, Any]]) -> dict[str, 
         status = application.get("status")
         if not isinstance(job_id, str) or not isinstance(status, str):
             continue
-        normalized = status.casefold()
-        if normalized in {"interested", "applied"}:
-            statuses[job_id] = normalized
-        elif normalized in {"interview", "offer", "accepted"}:
-            statuses[job_id] = "applied"
-        elif normalized in {"rejected", "withdrawn"}:
-            statuses[job_id] = "skip"
+        try:
+            statuses[job_id] = dashboard_marker(status)
+        except ValueError:
+            continue
     return dict(sorted(statuses.items()))
 
 
@@ -335,8 +332,8 @@ def execute_public_workflow(
         aliases=aliases,
         statuses=application_statuses,
     )
-    # This workflow explicitly rescores observations. Refresh the derived fields
-    # that the generic lifecycle merge otherwise preserves as curated values.
+    # This run's scores win for jobs in the scan. Merge keeps curated fields for
+    # history that was not observed again.
     scored_by_id: dict[str, dict[str, Any]] = {}
     identity_aliases = {**aliases["company_aliases"], **aliases["title_aliases"]}
     for item in sorted(
@@ -350,17 +347,11 @@ def execute_public_workflow(
             source=item["source"], external_id=item["external_id"],
             company=item["company"], title=item["title"], aliases=identity_aliases,
         )
-        candidate = scored_by_id.get(job_id)
-        if candidate is None or (candidate.get("last_seen") or observed_on) < (item.get("last_seen") or observed_on):
-            scored_by_id[job_id] = item
-    for item in lifecycle["jobs"]:
-        current = scored_by_id.get(item["stable_id"])
-        if current is not None and (current.get("last_seen") or observed_on) < item["last_seen"]:
-            del scored_by_id[item["stable_id"]]
+        scored_by_id[job_id] = item
     for item in lifecycle["jobs"]:
         current = scored_by_id.get(item["stable_id"])
         if current is not None:
-            for field in ("score", "summary", "risk", "tracks", "skills", "visa_supported"):
+            for field in SCORING_FIELDS:
                 item[field] = current[field]
     repository.write(
         "lifecycle",

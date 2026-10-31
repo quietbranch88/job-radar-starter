@@ -25,16 +25,6 @@
     @media(max-width:820px){.masthead{grid-template-columns:1fr}.header-actions{justify-self:start}.recommendations{grid-template-columns:1fr}.recommendation-list{grid-template-columns:1fr}.filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.matches-grid{grid-template-columns:1fr}}
     @media(max-width:620px){.shell{width:min(100% - 22px,1160px);padding-top:22px}.statbar{grid-template-columns:repeat(2,1fr)}.stat:nth-child(2){border-right:0}.stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.command{margin-inline:-11px}.scan-state{grid-template-columns:1fr}.tracking-grid{grid-template-columns:1fr}.command{margin-inline:0;padding-inline:0}.command-row{grid-template-columns:1fr}.view-switcher{width:100%}.view-switcher button{flex:1;padding-inline:6px;min-height:44px}.filter-grid{grid-template-columns:1fr}.chip,.status-actions button,.utility{min-height:44px}.job-card{grid-template-columns:42px minmax(0,1fr);gap:12px;padding-block:18px}.score{font-size:1.15rem}.job-heading{display:block}.signal{display:inline-block;margin-top:8px}.job-actions{align-items:start;flex-direction:column}.swipe-card{min-height:430px;padding:22px}.swipe-card h2{margin-top:45px}.footer{flex-direction:column}}
     @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}
-
-    .optional-sync{margin:24px 0;padding:18px;border:1px solid var(--line);border-radius:12px}
-    .optional-sync summary{cursor:pointer;font-weight:700;min-height:44px}
-    .optional-sync p{max-width:85ch;color:var(--muted);font-size:.85rem}
-    .optional-sync .sync-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-    .optional-sync input[type=password]{max-width:100%;width:24em;box-sizing:border-box;min-height:44px}
-    .optional-sync button{min-height:44px;white-space:normal}
-    .optional-sync [hidden]{display:none!important}
-    .optional-sync li{overflow-wrap:anywhere;font-size:.85rem}
-    .optional-sync label{display:block;margin:12px 0;font-size:.85rem}
   </style>
 </head>
 <body>
@@ -49,45 +39,6 @@
     <section class="statbar" aria-label="Scan summary"><div class="stat"><strong id="visibleCount">2</strong><span>visible roles</span></div><div class="stat"><strong id="pendingCount">2</strong><span>to review</span></div><div class="stat"><strong id="matchCount">0</strong><span>saved matches</span></div><div class="stat"><strong id="sourceCount">2</strong><span>official sources</span></div></section>
 <section class="tracking-grid"><article class="tracking-card" id="trackingSummary" data-testid="tracking-summary"><h2>0 tracked applications</h2><p>0 applied · 0 interview · 0 rejected</p></article><article class="tracking-card" id="dueActions" data-testid="due-actions"><h2>Due actions</h2><ul><li>No due actions</li></ul></article></section>
 
-
-    <details class="optional-sync" id="optionalSync" data-dashboard-optional-sync="1">
-      <summary>Optional status sync (off by default)</summary>
-      <p id="syncPrivacy">If enabled, Cloudflare is a third party receiving only stable job IDs and
-      interested / applied / skip / dead browser markers. No resume, job description, notes,
-      profile, or CLI application records are sent. Cloudflare Durable Object storage retains
-      the latest statuses until the operator deletes them; review the operator's retention,
-      backup, privacy, and regional-processing settings before enabling sync.</p>
-      <p>Disconnect only clears this tab's token; disconnect is not remote deletion.
-      Clearing a local status or omitting an ID from Push does not remove its remote status.
-      This client cannot delete remote keys. A later Pull can restore an omitted status.
-      Push replaces remote values for the IDs sent; concurrent same-ID writes use the last
-      accepted value. Pull before Push to inspect remote differences.</p>
-      <p>Sync uses only this site's <code>/v1/statuses</code>. Serve this page and the authenticated
-      Worker through the same HTTPS origin (HTTP is allowed only on localhost, 127.0.0.1, or [::1]).
-      The token stays in memory until disconnect or reload.
-      Synced applied is an unconfirmed browser marker; use the local CLI to confirm a submission.
-      CLI-confirmed statuses stay locked and are excluded from Push.</p>
-      <div id="syncSetup">
-        <label><input type="checkbox" id="syncConsent"> I understand the privacy and retention notice and opt in to manual sync.</label>
-        <label for="syncToken">Worker Bearer token (this tab only)</label>
-        <input id="syncToken" type="password" autocomplete="off" spellcheck="false" maxlength="4096" aria-describedby="syncPrivacy">
-        <button class="utility" type="button" id="syncConnect">Enable manual sync</button>
-      </div>
-      <div class="sync-controls" id="syncActions" hidden>
-        <button class="utility" type="button" id="syncPull">Pull remote statuses</button>
-        <button class="utility" type="button" id="syncPush">Push current local statuses</button>
-        <button class="utility" type="button" id="syncDisconnect">Disconnect</button>
-      </div>
-      <div id="syncPreview" hidden>
-        <p id="syncPreviewSummary"></p><ul id="syncConflicts"></ul>
-        <div class="sync-controls">
-          <button class="utility" type="button" id="syncKeep">Apply Pull; keep local conflicts</button>
-          <button class="utility" type="button" id="syncRemote">Apply Pull; use remote conflicts</button>
-          <button class="utility" type="button" id="syncCancel">Cancel Pull</button>
-        </div>
-      </div>
-      <p id="syncMessage" role="status" aria-live="polite">Sync is off. No sync requests have been made.</p>
-    </details>
     <section class="recommendations"><div><p class="section-kicker">Start here</p><h2>Highest-scored roles you have not handled</h2></div><div class="recommendation-list" id="recommendations"></div></section>
     <section class="command" aria-label="Review controls">
       <div class="command-row"><nav class="view-switcher" aria-label="Dashboard view"><button class="active" type="button" data-view="list">List</button><button type="button" data-view="deck">Swipe review</button><button type="button" data-view="matches">Saved matches</button></nav><div class="search"><input id="searchBox" type="search" aria-label="Search jobs" placeholder="Search company, role, skill, or location"><kbd>/</kbd></div></div>
@@ -98,7 +49,7 @@
         <div class="score" aria-label="Match score">91</div>
         <div class="job-body">
           <header class="job-heading"><div><h3>Senior Backend Engineer</h3><p class="company">Example Systems · Toronto, Canada</p></div><span class="signal visa">Visa support listed</span></header>
-          <div class="tags"><span class="tag">greenhouse</span><span class="tag">backend</span><span class="tag">CA</span><span class="tag">Go</span><span class="tag">Kubernetes</span><span class="tag">active</span></div><p class="tag" data-operator-review="pending">Operator review: pending · resume not selected</p><p class="salary">CAD 148k–176k</p><p class="why"><b>Why it may fit</b>Strong backend and distributed-systems overlap.</p><p class="risk"><b>Check before applying</b>Confirm work authorization and location requirements.</p>
+          <div class="tags"><span class="tag">greenhouse</span><span class="tag">backend</span><span class="tag">CA</span><span class="tag">Go</span><span class="tag">Kubernetes</span><span class="tag">active</span></div><p class="salary">CAD 148k–176k</p><p class="why"><b>Why it may fit</b>Strong backend and distributed-systems overlap.</p><p class="risk"><b>Check before applying</b>Confirm work authorization and location requirements.</p>
           <footer class="job-actions">
             <div class="status-actions" aria-label="Tracking status"><button type="button" data-state="interested">☆ Interested</button><button type="button" data-state="applied">✓ Applied</button><button type="button" data-state="skip">Hide</button><button type="button" data-state="dead">Expired</button></div>
             <div class="source-actions"><a class="primary-link" href="https://example.com/jobs/northstar-backend" target="_blank" rel="noopener noreferrer">Open official post <span aria-hidden="true">↗</span></a><time>2026-07-14</time></div>
@@ -110,7 +61,7 @@
         <div class="score" aria-label="Match score">84</div>
         <div class="job-body">
           <header class="job-heading"><div><h3>AI Platform Engineer</h3><p class="company">Invented Labs · Remote</p></div></header>
-          <div class="tags"><span class="tag">ashby</span><span class="tag">ai-platform</span><span class="tag">REMOTE</span><span class="tag">ai-product</span><span class="tag">backend</span><span class="tag">Python</span><span class="tag">LLM</span><span class="tag">active</span></div><p class="tag" data-operator-review="pending">Operator review: pending · resume not selected</p><p class="why"><b>Why it may fit</b>Combines platform operations with applied AI delivery.</p><p class="risk"><b>Check before applying</b>Confirm eligible hiring countries for the remote role.</p>
+          <div class="tags"><span class="tag">ashby</span><span class="tag">ai-platform</span><span class="tag">REMOTE</span><span class="tag">ai-product</span><span class="tag">backend</span><span class="tag">Python</span><span class="tag">LLM</span><span class="tag">active</span></div><p class="why"><b>Why it may fit</b>Combines platform operations with applied AI delivery.</p><p class="risk"><b>Check before applying</b>Confirm eligible hiring countries for the remote role.</p>
           <footer class="job-actions">
             <div class="status-actions" aria-label="Tracking status"><button type="button" data-state="interested">☆ Interested</button><button type="button" data-state="applied">✓ Applied</button><button type="button" data-state="skip">Hide</button><button type="button" data-state="dead">Expired</button></div>
             <div class="source-actions"><a class="primary-link" href="https://example.com/jobs/cedar-ai-platform" target="_blank" rel="noopener noreferrer">Open official post <span aria-hidden="true">↗</span></a><time>2026-07-13</time></div>
@@ -120,7 +71,7 @@
     <section class="panel" id="deckPanel" data-panel="deck" hidden><div class="deck-shell"><div id="swipeDeck"></div></div></section>
     <section class="panel" id="matchesPanel" data-panel="matches" hidden><div class="tier-head"><h2>Saved matches</h2><span>Interested and applied roles</span></div><div class="matches-grid" id="matchesGrid"></div></section>
     <p id="applicationRecordingHelp">Applied is a browser marker, not proof of submission. Export state, then explicitly confirm the submission with the local tracking command to update application metrics. Recorded application statuses take precedence over browser markers.</p>
-    <footer class="footer"><p>Job data and tracking state remain on this device by default. Always verify availability and work-authorization details on the official posting.</p><p>Optional sync sends only stable job IDs and browser status markers after opt-in.</p></footer>
+    <footer class="footer"><p>Job data and tracking state remain on this device by default. Always verify availability and work-authorization details on the official posting.</p><p>No applicant data is sent by this page.</p></footer>
   </main>
   <script type="application/json" id="dashboard-data">{"contract_version":1,"scan":{"state":"complete","mode":"atomic","incomplete":false,"observed_on":"","failures":[]},"jobs":[{"source":"greenhouse","external_id":"northstar-backend","company":"Example Systems","title":"Senior Backend Engineer","location":"Toronto, Canada","url":"https://example.com/jobs/northstar-backend","published_at":"2026-07-14T00:00:00Z","score":91,"country":"CA","category":"backend","summary":"Strong backend and distributed-systems overlap.","risk":"Confirm work authorization and location requirements.","salary":"CAD 148k–176k","tracks":["backend"],"skills":["Go","Kubernetes"],"first_seen":"2026-07-14","visa_supported":true,"jd_evidence":[],"jd_evidence_source":"","jd_hash":"","last_seen":"2026-07-14","stable_id":"greenhouse:northstar-backend","legacy_status_keys":[],"freshness":"active"},{"source":"ashby","external_id":"cedar-ai-platform","company":"Invented Labs","title":"AI Platform Engineer","location":"Remote","url":"https://example.com/jobs/cedar-ai-platform","published_at":"2026-07-13T00:00:00Z","score":84,"country":"REMOTE","category":"ai-platform","summary":"Combines platform operations with applied AI delivery.","risk":"Confirm eligible hiring countries for the remote role.","salary":"","tracks":["ai-product","backend"],"skills":["Python","LLM"],"first_seen":"2026-07-13","visa_supported":null,"jd_evidence":[],"jd_evidence_source":"","jd_hash":"","last_seen":"2026-07-13","stable_id":"ashby:cedar-ai-platform","legacy_status_keys":[],"freshness":"active"}],"review":{"rejected":[],"sampled_rejected_ids":[]},"tracking":{"statuses":{},"metrics":{"contract_version":1,"total":0,"funnel":{},"rejection_stages":{},"slices":{"resume_version":{},"channel":{},"country":{}}},"due_actions":[]}}</script>
   <script>
@@ -143,7 +94,7 @@
 
     function migrateLegacyState(value){const migrated={...value};JOBS.forEach(job=>{const stable=job.stable_id||`${job.source}:${job.external_id}`;if(migrated[stable])return;const legacyKeys=[`${job.source}:${job.external_id}`,job.url,...list(job.legacy_status_keys)].filter(Boolean);for(const legacy of legacyKeys){if(migrated[legacy]){migrated[stable]=migrated[legacy];delete migrated[legacy];break}}});return migrated}
     function loadState(){try{const value=JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}'),valid=value&&typeof value==='object'&&!Array.isArray(value)?value:{};return {...migrateLegacyState(valid),...DASHBOARD.tracking.statuses}}catch{return {...DASHBOARD.tracking.statuses}}}
-    function saveState(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state))}finally{document.dispatchEvent(new Event('job-radar:statuses-saved'))}}
+    function saveState(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state))}
     function jobKey(job){return job.stable_id||`${job.source}:${job.external_id}`}
     function esc(value){return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]))}
     function safeUrl(value){try{const url=new URL(value);return ['http:','https:'].includes(url.protocol)?url.href:''}catch{return ''}}
@@ -163,7 +114,7 @@
     function renderRecommendations(){const picks=JOBS.filter(job=>!statusOf(job)).sort((a,b)=>(b.score??-1)-(a.score??-1)).slice(0,3),root=document.querySelector('#recommendations');root.innerHTML=picks.length?picks.map((job,index)=>`<article class="recommendation"><span class="rank">0${index+1} · ${esc(job.score??'—')} match</span><strong>${esc(job.title)}</strong><span>${esc(job.company)} · ${esc(job.location||job.country)}</span></article>`).join(''):(JOBS.length?'<div class="recommendation empty">No unhandled roles remain in this scan.</div>':'<div class="recommendation empty">No roles yet. Replace the placeholder company boards, then scan again.</div>')}
     function rejectedAuditMarkup(item){return `<div class="rejected-item" data-review-state="rejected"><b>${esc(item.stable_id)}</b> · ${list(item.reason_codes).map(esc).join(', ')}</div>`}
     function renderRejectedAudit(){const root=document.querySelector('#rejectedAuditItems'),loadMore=document.querySelector('#loadMoreRejected');if(!root||!loadMore)return;const rendered=DASHBOARD.review.rejected.slice(0,rejectedRenderLimit);root.innerHTML=rendered.map(rejectedAuditMarkup).join('');const remaining=DASHBOARD.review.rejected.length-rendered.length;loadMore.hidden=remaining<=0;if(remaining>0){const count=Math.min(REJECTED_PAGE_SIZE,remaining);loadMore.textContent=`Load ${count} more rejected`;loadMore.setAttribute('aria-label',`Load ${count} more rejected jobs, ${remaining} remaining`)}}
-    function operatorReviewMarkup(job){const r=job.operator_review||{},approved=r.applicable===true&&r.approved===true&&r.decision==='approve',rejected=r.applicable===true&&r.decision==='reject',label=approved?'approved':rejected?'rejected':'pending',reason=String(r.reason||'resume_not_selected').replaceAll('_',' ');return `<p class="tag" data-operator-review="${label}">Operator review: ${label}${label==='pending'?' · '+esc(reason):''}</p>`}
+    function operatorReviewMarkup(job){const r=job.operator_review;if(!r||typeof r!=='object'||(r.applicable!==true&&(r.reason||'resume_not_selected')==='resume_not_selected'))return '';const approved=r.applicable===true&&r.approved===true&&r.decision==='approve',rejected=r.applicable===true&&r.decision==='reject',label=approved?'approved':rejected?'rejected':'pending',reason=String(r.reason||'resume_not_selected').replaceAll('_',' ');return `<p class="tag" data-operator-review="${label}">Operator review: ${label}${label==='pending'?' · '+esc(reason):''}</p>`}
     function detailMarkup(job){return `${operatorReviewMarkup(job)}${job.salary?`<p class="salary">${esc(job.salary)}</p>`:''}${job.summary?`<p class="why"><b>Why it may fit</b>${esc(job.summary)}</p>`:''}${job.risk?`<p class="risk"><b>Check before applying</b>${esc(job.risk)}</p>`:''}`}
     function renderDeck(){const root=document.querySelector('#swipeDeck'),deck=pendingJobs();if(!deck.length){root.innerHTML='<div class="empty-state"><strong>Review queue complete</strong>Change a filter, clear a previous status, or import a new scan.</div>';return}const job=deck[0],url=safeUrl(job.url);root.innerHTML=`<article class="swipe-card" id="topSwipeCard" tabindex="-1"><span class="stamp like">INTERESTED</span><span class="stamp nope">HIDE</span><div class="score">${esc(job.score??'—')}</div><p class="eyebrow">${esc(job.source)} / ${esc(job.country||'other')}</p><h2>${esc(job.title)}</h2><p class="swipe-company">${esc(job.company)} · ${esc(job.location)}</p><div class="tags">${[job.category,...list(job.tracks),...list(job.skills)].filter(Boolean).map(value=>`<span class="tag">${esc(value)}</span>`).join('')}</div>${detailMarkup(job)}${url?`<p><a class="primary-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open official post ↗</a></p>`:''}</article><div class="deck-actions"><button type="button" data-deck="undo" aria-label="Undo">↩</button><button type="button" data-state="skip" aria-label="Hide">×</button><button type="button" data-state="dead" aria-label="Mark expired">!</button><button type="button" data-state="applied" aria-label="Mark applied">✓</button><button type="button" data-state="interested" aria-label="Mark interested">☆</button></div><p class="deck-meta">${deck.length} left · ← hide · → interested · ↑ applied</p>`;root.querySelectorAll('[data-state]').forEach(button=>button.addEventListener('click',()=>setStatus(job,button.dataset.state)));root.querySelector('[data-deck="undo"]').addEventListener('click',undo);attachSwipe(root.querySelector('#topSwipeCard'),job)}
     function attachSwipe(card,job){let start=0,delta=0,dragging=false;card.addEventListener('pointerdown',event=>{start=event.clientX;delta=0;dragging=true;card.setPointerCapture(event.pointerId)});card.addEventListener('pointermove',event=>{if(!dragging)return;delta=event.clientX-start;card.style.transform=`translateX(${delta}px) rotate(${delta/30}deg)`;card.querySelector('.stamp.like').style.opacity=Math.max(0,delta/100);card.querySelector('.stamp.nope').style.opacity=Math.max(0,-delta/100)});card.addEventListener('pointerup',()=>{dragging=false;if(Math.abs(delta)>110)setStatus(job,delta>0?'interested':'skip');else{card.style.transform='';card.querySelectorAll('.stamp').forEach(stamp=>stamp.style.opacity=0)}})}
@@ -191,229 +142,6 @@
     const root=document.documentElement,savedTheme=localStorage.getItem('job-radar-theme');if(savedTheme==='light'||savedTheme==='dark')root.dataset.theme=savedTheme;document.querySelector('#themeToggle').addEventListener('click',()=>{root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';localStorage.setItem('job-radar-theme',root.dataset.theme)});
     renderRejectedAudit();
     renderAll();
-    // Explicit lexical hooks: no application records or credentials enter dashboard state.
-    (function installOptionalStatusClient(hooks) {
-      const nodes = Object.fromEntries([
-        'Setup', 'Consent', 'Token', 'Connect', 'Actions', 'Pull', 'Push',
-        'Disconnect', 'Preview', 'PreviewSummary', 'Conflicts', 'Keep', 'Remote',
-        'Cancel', 'Message',
-      ].map(name => [name, document.getElementById('sync' + name)]));
-      const allowed = new Set(['interested', 'applied', 'skip', 'dead']);
-      const stableKey = /^job_[a-z0-9_-]{8,128}$/;
-      const MAX_ITEMS = 500, MAX_BYTES = 65536, MAX_RESPONSE_BYTES = 81920;
-      const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
-      const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-      const eligible = (key, value) => key.length <= 128 && stableKey.test(key) && allowed.has(value);
-      const secureOrigin = location.protocol === 'https:' || (location.protocol === 'http:'
-        && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname));
-      let token = '', epoch = 0, revision = 0, active = null, pending = null, applying = false, externalEdit = false;
-      let lastLocal = hooks.snapshot();
-      const edited = new Set();
-
-      function message(value) { nodes.Message.textContent = value; }
-      function refresh() {
-        nodes.Setup.hidden = Boolean(token);
-        nodes.Actions.hidden = !token;
-        nodes.Connect.disabled = Boolean(active);
-        nodes.Pull.disabled = Boolean(active || pending);
-        nodes.Push.disabled = Boolean(active || pending);
-        nodes.Preview.hidden = !pending;
-        nodes.Token.disabled = !secureOrigin;
-      }
-      function discardPreview() {
-        pending = null;
-        nodes.Conflicts.replaceChildren();
-        nodes.PreviewSummary.textContent = '';
-      }
-      function disconnect() {
-        epoch += 1;
-        token = '';
-        nodes.Token.value = '';
-        nodes.Consent.checked = false;
-        discardPreview();
-        active?.controller.abort();
-        message('Sync is off; token cleared. Remote data was not deleted. An in-flight Push may already have reached the Worker.');
-        refresh();
-      }
-      hooks.subscribe(event => {
-        if (applying) return;
-        if (event.type === 'storage') externalEdit = true;
-        const next = hooks.snapshot();
-        for (const key of new Set([...Object.keys(lastLocal), ...Object.keys(next)])) {
-          if (lastLocal[key] !== next[key]) edited.add(key);
-        }
-        lastLocal = next;
-        revision += 1;
-        const interrupted = Boolean(active || pending);
-        discardPreview();
-        active?.controller.abort();
-        if (externalEdit) message('Another tab changed local statuses. Sync is paused: reload this page to load those edits before Pull or Push. An in-flight Push may already have reached the Worker.');
-        else if (interrupted) message('Local statuses changed. The old Pull/Push result was discarded; Pull again to review. An in-flight Push may already have reached the Worker.');
-        refresh();
-      });
-
-      function documentStatuses(value) {
-        if (!record(value) || Object.keys(value).sort().join(',') !== 'contract_version,statuses'
-            || value.contract_version !== 1 || !record(value.statuses)) throw new Error('invalid');
-        const entries = Object.entries(value.statuses);
-        if (entries.length > MAX_ITEMS || !entries.every(([key, status]) => eligible(key, status))) throw new Error('invalid');
-        return Object.fromEntries(entries);
-      }
-      async function readDocument(response) {
-        const contentType = response.headers.get('content-type')?.split(';')[0].trim();
-        if (contentType !== 'application/json' || !response.body) throw new Error('invalid');
-        const reader = response.body.getReader(), chunks = [];
-        let length = 0;
-        try {
-          for (;;) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            length += value.byteLength;
-            if (length > MAX_RESPONSE_BYTES) throw new Error('invalid');
-            chunks.push(value);
-          }
-        } finally { await reader.cancel().catch(() => {}); }
-        const bytes = new Uint8Array(length);
-        let offset = 0;
-        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-        try { return documentStatuses(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))); }
-        catch { throw new Error('invalid'); }
-      }
-      function pushPayload() {
-        const locked = hooks.locked(), snapshot = hooks.snapshot();
-        const entries = Object.entries(snapshot).filter(([key, status]) => !own(locked, key) && eligible(key, status));
-        if (entries.length > MAX_ITEMS) throw new Error('bounds');
-        const statuses = Object.fromEntries(entries);
-        const body = JSON.stringify({ contract_version: 1, statuses, legacy_keys: [] });
-        if (new TextEncoder().encode(body).byteLength > MAX_BYTES) throw new Error('bounds');
-        return { body, statuses, omitted: Object.keys(snapshot).length - entries.length };
-      }
-      const current = operation => token && operation.epoch === epoch && operation.revision === revision;
-      function responseError(status) {
-        if (status === 401 || status === 403) return 'Authentication failed. Disconnect, check the Worker token, and enable sync again.';
-        if (status === 404) return 'Worker route unavailable. Ask the operator to serve /v1/statuses on this exact origin.';
-        if (status === 409) return 'Remote storage limit reached. Ask the operator to review retained statuses; local statuses are unchanged.';
-        if (status === 413) return 'Worker rejected the payload size. Reduce the eligible local status set before retrying.';
-        return 'Worker unavailable. Check the same-origin route and Worker configuration, then retry manually.';
-      }
-      async function run(method) {
-        if (!token || active || pending) return;
-        if (externalEdit) { message('Another tab changed local statuses. Reload this page before Pull or Push; no request was made.'); return; }
-        let payload;
-        if (method === 'POST') {
-          try { payload = pushPayload(); }
-          catch { message('Push stopped: at most 500 eligible statuses and 64 KiB are allowed. Nothing was sent; reduce the local status set.'); return; }
-        }
-        const operation = { epoch, revision, method, controller: new AbortController() };
-        active = operation;
-        refresh();
-        message(method === 'GET' ? 'Pulling remote statuses for review...' : 'Pushing the current eligible local statuses...');
-        const timeout = setTimeout(() => operation.controller.abort(), 15000);
-        try {
-          const response = await fetch('/v1/statuses', {
-            method, mode: 'same-origin', credentials: 'omit', redirect: 'error',
-            cache: 'no-store', referrerPolicy: 'no-referrer', signal: operation.controller.signal,
-            headers: { authorization: 'Bearer ' + token, ...(payload ? { 'content-type': 'application/json' } : {}) },
-            ...(payload ? { body: payload.body } : {}),
-          });
-          if (!current(operation)) return;
-          if (response.status !== 200) {
-            message(responseError(response.status) + (payload ? ' Push may have reached the Worker; Pull before retrying.' : ' Local statuses are unchanged.'));
-            return;
-          }
-          const remote = await readDocument(response);
-          if (!current(operation)) return;
-          if (payload) {
-            if (!Object.entries(payload.statuses).every(([key, value]) => remote[key] === value)) throw new Error('invalid');
-            for (const key of Object.keys(payload.statuses)) edited.delete(key);
-            message(`Push confirmed for ${Object.keys(payload.statuses).length} browser markers; ${payload.omitted} ineligible or CLI-locked entries omitted. Local statuses were not changed. Omitted/cleared IDs remain remote.`);
-          } else {
-            const local = hooks.snapshot(), locked = hooks.locked();
-            const conflicts = Object.entries(remote).filter(([key, value]) => !own(locked, key)
-              && (own(local, key) || edited.has(key)) && local[key] !== value);
-            pending = { remote, conflicts: new Set(conflicts.map(([key]) => key)), epoch, revision };
-            nodes.PreviewSummary.textContent = `Review ${Object.keys(remote).length} remote markers: ${conflicts.length} local conflicts. CLI-locked statuses will be skipped. Unrelated local state will be kept.`;
-            nodes.Conflicts.replaceChildren(...conflicts.map(([key, value]) => {
-              const item = document.createElement('li');
-              item.textContent = `${key}: local ${local[key] || '(cleared locally)'}; remote ${value}`;
-              return item;
-            }));
-            message('Pull ready for review. Choose whether to keep local conflicts or use remote conflicts. No local statuses changed yet.');
-          }
-        } catch (error) {
-          if (current(operation)) message((error.message === 'invalid'
-            ? 'Invalid Worker response. Check the v1 status contract with the operator; local statuses are unchanged.'
-            : 'Cannot reach the same-origin Worker (offline, timeout, or blocked route). Check the connection and retry manually; local statuses are unchanged.')
-            + (payload ? ' Push may have reached the Worker; Pull before retrying.' : ''));
-        } finally {
-          clearTimeout(timeout);
-          if (active === operation) active = null;
-          refresh();
-        }
-      }
-      function applyPull(useRemote) {
-        if (!pending || active || externalEdit || pending.epoch !== epoch || pending.revision !== revision || !token) return;
-        const locked = hooks.locked();
-        const updates = Object.fromEntries(Object.entries(pending.remote).filter(([key]) => !own(locked, key)
-          && (useRemote || !pending.conflicts.has(key))));
-        applying = true;
-        try {
-          hooks.apply(updates);
-          for (const key of Object.keys(updates)) edited.delete(key);
-          lastLocal = hooks.snapshot();
-          revision += 1;
-          discardPreview();
-          message(`Pull applied: ${Object.keys(updates).length} browser markers merged; ${useRemote ? 'remote' : 'local'} conflicts chosen. Unrelated local state kept. Applied markers do not confirm applications.`);
-        } catch {
-          message('Browser storage could not save the Pull. Local statuses were restored. Free browser storage or export local state, then retry.');
-        } finally { applying = false; refresh(); }
-      }
-      nodes.Connect.addEventListener('click', () => {
-        if (active) return;
-        if (!secureOrigin) {
-          message('Sync requires HTTPS, or HTTP on localhost, 127.0.0.1, or [::1], with a same-origin /v1/statuses Worker. File dashboards remain local-only.'); return;
-        }
-        if (!nodes.Consent.checked || !nodes.Token.value || /[\u0000-\u001f\u007f]/.test(nodes.Token.value)) {
-          message('Read and accept the privacy notice, then enter the Worker Bearer token.'); return;
-        }
-        epoch += 1;
-        token = nodes.Token.value;
-        nodes.Token.value = '';
-        message('Manual sync enabled. No request made yet. Choose Pull or Push; there is no background sync.');
-        refresh();
-      });
-      nodes.Pull.addEventListener('click', () => run('GET'));
-      nodes.Push.addEventListener('click', () => run('POST'));
-      nodes.Disconnect.addEventListener('click', disconnect);
-      nodes.Keep.addEventListener('click', () => applyPull(false));
-      nodes.Remote.addEventListener('click', () => applyPull(true));
-      nodes.Cancel.addEventListener('click', () => { discardPreview(); message('Pull cancelled. Local statuses unchanged.'); refresh(); });
-      window.addEventListener('pagehide', disconnect);
-      refresh();
-    })({
-      snapshot: () => ({ ...state }),
-      locked: () => ({ ...DASHBOARD.tracking.statuses }),
-      subscribe: listener => {
-        document.addEventListener('job-radar:statuses-saved', listener);
-        window.addEventListener('storage', event => {
-          if (event.storageArea === localStorage && (event.key === STORAGE_KEY || event.key === null)) listener(event);
-        });
-      },
-      apply: updates => {
-        const before = { ...state };
-        for (const [key, value] of Object.entries(updates)) {
-          if (!Object.prototype.hasOwnProperty.call(DASHBOARD.tracking.statuses, key)) state[key] = value;
-        }
-        try { saveState(); }
-        catch (error) {
-          for (const key of Object.keys(state)) delete state[key];
-          Object.assign(state, before);
-          throw error;
-        }
-        renderAll();
-      },
-    });
-
   </script>
 </body>
 </html>
