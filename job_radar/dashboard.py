@@ -23,79 +23,6 @@ def _csv_attr(values: Sequence[str]) -> str:
     return ",".join(value.strip().lower() for value in values if value.strip())
 
 
-def _job_card(job: Job) -> str:
-    source, company, title = map(escape, (job.source, job.company, job.title))
-    location = escape(job.location or "Location not specified")
-    country = escape(job.country or "other", quote=True)
-    category = escape(job.category or "other", quote=True)
-    tracks = escape(_csv_attr(job.tracks), quote=True)
-    skills = escape(_csv_attr(job.skills), quote=True)
-    first_seen = escape(job.first_seen or job.published_at, quote=True)
-    key = escape(_job_key(job), quote=True)
-    search = escape(
-        " ".join(
-            (
-                job.company,
-                job.title,
-                job.location,
-                job.category,
-                " ".join(job.tracks),
-                " ".join(job.skills),
-                job.summary,
-            )
-        ),
-        quote=True,
-    )
-    score = str(job.score) if job.score is not None else "—"
-    details = []
-    if job.salary:
-        details.append(f'<p class="salary">{escape(job.salary)}</p>')
-    if job.summary:
-        details.append(f'<p class="why"><b>Why it may fit</b>{escape(job.summary)}</p>')
-    if job.risk:
-        details.append(f'<p class="risk"><b>Check before applying</b>{escape(job.risk)}</p>')
-
-    tag_values = [job.source, job.category or "uncategorized", job.country or "location unknown"]
-    tag_values.extend(job.tracks)
-    tag_values.extend(job.skills)
-    tags = "".join(f'<span class="tag">{escape(value)}</span>' for value in dict.fromkeys(tag_values) if value)
-    visa = ""
-    if job.visa_supported is True:
-        visa = '<span class="signal visa">Visa support listed</span>'
-    elif job.visa_supported is False:
-        visa = '<span class="signal check">Work authorization required</span>'
-
-    url = _safe_url(job.url)
-    link = (
-        f'<a class="primary-link" href="{escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">Open official post <span aria-hidden="true">↗</span></a>'
-        if url
-        else '<span class="primary-link disabled" aria-disabled="true">Invalid source link</span>'
-    )
-    date = escape(job.first_seen or job.published_at or "Date not specified")
-
-    return f"""
-      <article class="job-card" data-key="{key}" data-source="{source}" data-country="{country}" data-category="{category}" data-tracks="{tracks}" data-skills="{skills}" data-first-seen="{first_seen}" data-search="{search}">
-        <div class="score" aria-label="Match score">{score}</div>
-        <div class="job-body">
-          <header class="job-heading">
-            <div><h3>{title}</h3><p class="company">{company} · {location}</p></div>
-            {visa}
-          </header>
-          <div class="tags">{tags}</div>
-          {''.join(details)}
-          <footer class="job-actions">
-            <div class="status-actions" aria-label="Tracking status">
-              <button type="button" data-state="interested">☆ Interested</button>
-              <button type="button" data-state="applied">✓ Applied</button>
-              <button type="button" data-state="skip">Hide</button>
-              <button type="button" data-state="dead">Expired</button>
-            </div>
-            <div class="source-actions">{link}<time>{date}</time></div>
-          </footer>
-        </div>
-      </article>"""
-
-
 def _view_job_card(job: Mapping[str, object], rejected_ids: set[str]) -> str:
     def text(field: str, default: str = "") -> str:
         value = job.get(field, default)
@@ -164,6 +91,8 @@ def _view_job_card(job: Mapping[str, object], rejected_ids: set[str]) -> str:
 def _operator_review_html(job: Mapping[str, object]) -> str:
     review = job.get('operator_review')
     review = review if isinstance(review, dict) else {}
+    if review.get('applicable') is not True and review.get('reason', 'resume_not_selected') == 'resume_not_selected':
+        return ""
     approved = review.get('applicable') is True and review.get('approved') is True and review.get('decision') == 'approve'
     rejected = review.get('applicable') is True and review.get('decision') == 'reject'
     label = 'approved' if approved else 'rejected' if rejected else 'pending'
@@ -265,7 +194,7 @@ __REJECTED_AUDIT__
     function renderRecommendations(){const picks=JOBS.filter(job=>!statusOf(job)).sort((a,b)=>(b.score??-1)-(a.score??-1)).slice(0,3),root=document.querySelector('#recommendations');root.innerHTML=picks.length?picks.map((job,index)=>`<article class="recommendation"><span class="rank">0${index+1} · ${esc(job.score??'—')} match</span><strong>${esc(job.title)}</strong><span>${esc(job.company)} · ${esc(job.location||job.country)}</span></article>`).join(''):(JOBS.length?'<div class="recommendation empty">No unhandled roles remain in this scan.</div>':'<div class="recommendation empty">No roles yet. Replace the placeholder company boards, then scan again.</div>')}
     function rejectedAuditMarkup(item){return `<div class="rejected-item" data-review-state="rejected"><b>${esc(item.stable_id)}</b> · ${list(item.reason_codes).map(esc).join(', ')}</div>`}
     function renderRejectedAudit(){const root=document.querySelector('#rejectedAuditItems'),loadMore=document.querySelector('#loadMoreRejected');if(!root||!loadMore)return;const rendered=DASHBOARD.review.rejected.slice(0,rejectedRenderLimit);root.innerHTML=rendered.map(rejectedAuditMarkup).join('');const remaining=DASHBOARD.review.rejected.length-rendered.length;loadMore.hidden=remaining<=0;if(remaining>0){const count=Math.min(REJECTED_PAGE_SIZE,remaining);loadMore.textContent=`Load ${count} more rejected`;loadMore.setAttribute('aria-label',`Load ${count} more rejected jobs, ${remaining} remaining`)}}
-    function operatorReviewMarkup(job){const r=job.operator_review||{},approved=r.applicable===true&&r.approved===true&&r.decision==='approve',rejected=r.applicable===true&&r.decision==='reject',label=approved?'approved':rejected?'rejected':'pending',reason=String(r.reason||'resume_not_selected').replaceAll('_',' ');return `<p class="tag" data-operator-review="${label}">Operator review: ${label}${label==='pending'?' · '+esc(reason):''}</p>`}
+    function operatorReviewMarkup(job){const r=job.operator_review;if(!r||typeof r!=='object'||(r.applicable!==true&&(r.reason||'resume_not_selected')==='resume_not_selected'))return '';const approved=r.applicable===true&&r.approved===true&&r.decision==='approve',rejected=r.applicable===true&&r.decision==='reject',label=approved?'approved':rejected?'rejected':'pending',reason=String(r.reason||'resume_not_selected').replaceAll('_',' ');return `<p class="tag" data-operator-review="${label}">Operator review: ${label}${label==='pending'?' · '+esc(reason):''}</p>`}
     function detailMarkup(job){return `${operatorReviewMarkup(job)}${job.salary?`<p class="salary">${esc(job.salary)}</p>`:''}${job.summary?`<p class="why"><b>Why it may fit</b>${esc(job.summary)}</p>`:''}${job.risk?`<p class="risk"><b>Check before applying</b>${esc(job.risk)}</p>`:''}`}
     function renderDeck(){const root=document.querySelector('#swipeDeck'),deck=pendingJobs();if(!deck.length){root.innerHTML='<div class="empty-state"><strong>Review queue complete</strong>Change a filter, clear a previous status, or import a new scan.</div>';return}const job=deck[0],url=safeUrl(job.url);root.innerHTML=`<article class="swipe-card" id="topSwipeCard" tabindex="-1"><span class="stamp like">INTERESTED</span><span class="stamp nope">HIDE</span><div class="score">${esc(job.score??'—')}</div><p class="eyebrow">${esc(job.source)} / ${esc(job.country||'other')}</p><h2>${esc(job.title)}</h2><p class="swipe-company">${esc(job.company)} · ${esc(job.location)}</p><div class="tags">${[job.category,...list(job.tracks),...list(job.skills)].filter(Boolean).map(value=>`<span class="tag">${esc(value)}</span>`).join('')}</div>${detailMarkup(job)}${url?`<p><a class="primary-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open official post ↗</a></p>`:''}</article><div class="deck-actions"><button type="button" data-deck="undo" aria-label="Undo">↩</button><button type="button" data-state="skip" aria-label="Hide">×</button><button type="button" data-state="dead" aria-label="Mark expired">!</button><button type="button" data-state="applied" aria-label="Mark applied">✓</button><button type="button" data-state="interested" aria-label="Mark interested">☆</button></div><p class="deck-meta">${deck.length} left · ← hide · → interested · ↑ applied</p>`;root.querySelectorAll('[data-state]').forEach(button=>button.addEventListener('click',()=>setStatus(job,button.dataset.state)));root.querySelector('[data-deck="undo"]').addEventListener('click',undo);attachSwipe(root.querySelector('#topSwipeCard'),job)}
     function attachSwipe(card,job){let start=0,delta=0,dragging=false;card.addEventListener('pointerdown',event=>{start=event.clientX;delta=0;dragging=true;card.setPointerCapture(event.pointerId)});card.addEventListener('pointermove',event=>{if(!dragging)return;delta=event.clientX-start;card.style.transform=`translateX(${delta}px) rotate(${delta/30}deg)`;card.querySelector('.stamp.like').style.opacity=Math.max(0,delta/100);card.querySelector('.stamp.nope').style.opacity=Math.max(0,-delta/100)});card.addEventListener('pointerup',()=>{dragging=false;if(Math.abs(delta)>110)setStatus(job,delta>0?'interested':'skip');else{card.style.transform='';card.querySelectorAll('.stamp').forEach(stamp=>stamp.style.opacity=0)}})}
@@ -434,6 +363,8 @@ def _rejected_html(review: Mapping[str, object]) -> str:
 def render_dashboard_view_model(
     view_model: Mapping[str, object],
     output: Path,
+    *,
+    install_sync: bool = False,
 ) -> None:
     model = deepcopy(_validate_view_model(view_model))
     jobs = model["jobs"]
@@ -503,7 +434,8 @@ def render_dashboard_view_model(
         .replace("__TRACKING_SUMMARY__", _tracking_html(model["tracking"]))  # type: ignore[arg-type]
         .replace("__REJECTED_AUDIT__", _rejected_html(review))  # type: ignore[arg-type]
     )
-    html = install_optional_sync(html)
+    if install_sync:
+        html = install_optional_sync(html)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(html, encoding="utf-8")
 

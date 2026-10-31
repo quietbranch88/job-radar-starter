@@ -15,9 +15,7 @@
         "applications": { "$ref": "#/$defs/stateDocument" },
         "events": { "$ref": "#/$defs/stateDocument" },
         "lifecycle": { "$ref": "#/$defs/stateDocument" },
-        "rejected": { "$ref": "#/$defs/stateDocument" },
-        "sheet_outbox": { "$ref": "#/$defs/stateDocument" },
-        "review_receipts": { "$ref": "#/$defs/stateDocument" }
+        "rejected": { "$ref": "#/$defs/stateDocument" }
       }
     }
   },

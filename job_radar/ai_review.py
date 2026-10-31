@@ -19,16 +19,6 @@ class ReviewProvider(Protocol):
     def review(self, mode: str, request: dict[str, Any]) -> dict[str, Any]: ...
 
 
-class TimedReviewProvider(Protocol):
-    def review_with_timeout(
-        self,
-        mode: str,
-        request: dict[str, Any],
-        *,
-        timeout_seconds: float,
-    ) -> dict[str, Any]: ...
-
-
 class ReviewRepository(Protocol):
     def read(self, kind: str) -> dict[str, Any]: ...
 
@@ -273,22 +263,6 @@ def _fact_overrides(
     return facts
 
 
-def _should_escalate(
-    job: Mapping[str, Any],
-    fast_response: Mapping[str, Any],
-    config: Mapping[str, Any],
-    *,
-    visa_supported: bool | None,
-) -> bool:
-    fit = job["local_fit"]
-    return bool(
-        fit >= config["strong_fit_threshold"]
-        or visa_supported is None
-        or fit <= config["minimum_fit"] + config["near_threshold_margin"]
-        or fast_response["decision"] == "reject"
-    )
-
-
 def _reject_record(
     job: Mapping[str, Any],
     *,
@@ -474,7 +448,6 @@ def run_review_pipeline(
     jobs: Sequence[Mapping[str, Any]],
     repository: ReviewRepository,
     fast_provider: ReviewProvider | None,
-    strong_provider: ReviewProvider | None,
     config: Mapping[str, Any],
     observed_on: str,
     monotonic: Callable[[], float] = time.monotonic,
@@ -600,7 +573,6 @@ def run_review_pipeline(
         )
 
     ordered_jobs = sorted(jobs, key=lambda item: (-int(item.get("local_fit", -1)), str(item.get("stable_id", ""))))
-    escalation_candidates: list[tuple[Mapping[str, Any], dict[str, Any], dict[str, Any], bool | None]] = []
 
     def call(
         provider: ReviewProvider,
@@ -777,61 +749,8 @@ def run_review_pipeline(
             if deadline_exhausted:
                 break
             continue
-        visa_supported = job.get("visa_supported")
-        company_fact = fact_values.get(str(job["company"]).casefold())
-        if visa_supported is None and company_fact is not None:
-            visa_supported = company_fact
+        if job.get("visa_supported") is None and fact_values.get(str(job["company"]).casefold()) is not None:
             company_facts_used += 1
-        if strong_provider is not None and _should_escalate(
-            job,
-            fast_response,
-            config,
-            visa_supported=visa_supported,
-        ):
-            escalation_candidates.append((job, request, fast_response, visa_supported))
-        else:
-            reviews.append(fast_response)
-            if fast_response["decision"] == "reject":
-                checkpoint_rejected(
-                    _reject_record(
-                        job,
-                        reason_codes=fast_response["reason_codes"],
-                        observed_on=observed_on,
-                        hard_excluded=False,
-                    )
-                )
-
-    for job, request, fast_response, _ in escalation_candidates[: config["max_escalations"]]:
-        escalations += 1
-        strong_response = call(strong_provider, "strong", job, request)  # type: ignore[arg-type]
-        if strong_response is None:
-            reviews.append(fast_response)
-            if fast_response["decision"] == "reject":
-                checkpoint_rejected(
-                    _reject_record(
-                        job,
-                        reason_codes=fast_response["reason_codes"],
-                        observed_on=observed_on,
-                        hard_excluded=False,
-                    )
-                )
-            continue
-        rescued = fast_response["decision"] == "reject" and strong_response["decision"] == "recommend"
-        if fast_response["decision"] == "reject":
-            checkpoint_rejected(
-                _reject_record(
-                    job,
-                    reason_codes=fast_response["reason_codes"],
-                    observed_on=observed_on,
-                    hard_excluded=False,
-                    rescued=rescued,
-                )
-            )
-        if rescued:
-            strong_response["rescued"] = True
-        reviews.append(strong_response)
-
-    for job, _, fast_response, _ in escalation_candidates[config["max_escalations"] :]:
         reviews.append(fast_response)
         if fast_response["decision"] == "reject":
             checkpoint_rejected(

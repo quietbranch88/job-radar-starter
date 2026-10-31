@@ -6,6 +6,7 @@ import os
 import tempfile
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 from datetime import date
 from multiprocessing.connection import Connection
@@ -22,6 +23,7 @@ from job_radar.adapters import (
 )
 from job_radar.catalog import Catalog
 from job_radar.local_state import writer_guard
+from job_radar.posting_country import posting_country, scope_country
 from job_radar.scan_checkpoint import ScanCheckpoint
 from job_radar.source_health import SourceHealth
 
@@ -54,17 +56,17 @@ def _source_worker(
 ) -> None:
     try:
         result_connection.send(("ready", time.monotonic()))
-        fetch = _FETCHERS[source_name]
-        fetched = fetch(
-            board,
-            company_name,
-            get_json,
-            max_jobs=max_jobs_per_source,
-        )
         result_connection.send(
             (
                 "ok",
-                [replace(job, country=country) for job in fetched],
+                _fetch_scoped_jobs(
+                    source_name,
+                    board,
+                    company_name,
+                    country,
+                    get_json,
+                    max_jobs_per_source,
+                ),
             )
         )
     except HTTPError as error:
@@ -84,6 +86,26 @@ def _source_worker(
         result_connection.send(("error", None))
     finally:
         result_connection.close()
+
+
+def _fetch_scoped_jobs(
+    source_name: str,
+    board: str,
+    company_name: str,
+    country_scope: str,
+    get_json: Callable[[str], Any],
+    max_jobs_per_source: int,
+) -> list[Job]:
+    fetched = _FETCHERS[source_name](
+        board,
+        company_name,
+        get_json,
+        max_jobs=max_jobs_per_source,
+    )
+    return [
+        replace(job, country=posting_country(country_scope, job.location))
+        for job in fetched
+    ]
 
 
 def _failure(
@@ -170,8 +192,9 @@ def _enabled_companies(catalog: Catalog) -> list[tuple[str, str, str, str]]:
         source = catalog.sources[company.source]
         if not source.enabled:
             continue
-        country = company.countries[0] if len(company.countries) == 1 else ""
-        enabled.append((company_name, company.source, company.board, country))
+        enabled.append(
+            (company_name, company.source, company.board, scope_country(company.countries))
+        )
     return enabled
 
 
@@ -228,6 +251,7 @@ def scan_catalog_resilient(
     observed_on: str | None = None,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
     health_output: Path | None = None,
+    inline: bool = False,
 ) -> dict[str, Any]:
     if mode not in {"atomic", "best-effort"}:
         raise ValueError("mode must be atomic or best-effort")
@@ -265,6 +289,18 @@ def scan_catalog_resilient(
             raise ValueError('health output must be separate from jobs, checkpoint and guards')
     observed = observed_on or date.today().isoformat()
     date.fromisoformat(observed)
+    if inline and (checkpoint is not None or resume or health_output is not None):
+        raise ValueError("inline scan does not use checkpoint or health output")
+    if inline:
+        return _scan_inline(
+            companies,
+            get_json,
+            observed_on=observed,
+            mode=mode,
+            per_source_timeout=per_source_timeout,
+            output=output,
+            max_jobs_per_source=max_jobs_per_source,
+        )
     options = dict(mode=mode, per_source_timeout=per_source_timeout, output=output,
                    max_jobs_per_source=max_jobs_per_source, max_concurrency=max_concurrency,
                    on_progress=on_progress, health_output=health_output)
@@ -458,14 +494,117 @@ def _scan_companies(companies, get_json, *, checkpoint_state, observed_on, mode,
             if health is not None:
                 health.finish(interrupted=not completed_normally)
 
-    failures.sort(
+    return _publish_scan(
+        jobs,
+        failures,
+        observed_on=observed_on,
+        mode=mode,
+        output=output,
+        checkpoint_state=checkpoint_state,
+    )
+
+
+def _guarded_fetch(company, get_json, max_jobs_per_source):
+    company_name, source_name, board, country_scope = company
+    try:
+        return (
+            "ok",
+            _fetch_scoped_jobs(
+                source_name,
+                board,
+                company_name,
+                country_scope,
+                get_json,
+                max_jobs_per_source,
+            ),
+        )
+    except Exception as error:
+        return ("error", error)
+
+
+def _inline_failure(source: str, company: str, error: Exception, max_jobs: int) -> dict[str, str]:
+    if isinstance(error, HTTPError) and type(error.code) is int and 100 <= error.code <= 599:
+        status = error.code
+        category = (
+            "rate_limited" if status == 429
+            else "access_denied" if status in (401, 403)
+            else "not_found" if status == 404
+            else "upstream_error" if status >= 500
+            else "http_error"
+        )
+        return _failure(source, company, category, f"official source returned HTTP {status}")
+    if isinstance(error, TimeoutError) or (
+        isinstance(error, URLError) and isinstance(error.reason, TimeoutError)
+    ):
+        return _failure(source, company, "timeout", "official source connection timed out")
+    if isinstance(error, (URLError, ConnectionError)):
+        return _failure(source, company, "network_error", "official source connection failed")
+    if isinstance(error, SourcePayloadTooLarge):
+        return _failure(source, company, "oversized", f"source exceeded {max_jobs} jobs")
+    if isinstance(error, (KeyError, TypeError, ValueError)):
+        return _failure(source, company, "malformed", "source returned malformed data")
+    return _failure(source, company, "source_error", "source failed")
+
+
+def _scan_inline(
+    companies,
+    get_json,
+    *,
+    observed_on,
+    mode,
+    per_source_timeout,
+    output,
+    max_jobs_per_source,
+):
+    jobs: list[Job] = []
+    failures: list[dict[str, str]] = []
+    for company in companies:
+        company_name, source_name, _board, _country = company
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_guarded_fetch, company, get_json, max_jobs_per_source)
+            try:
+                kind, payload = future.result(timeout=per_source_timeout)
+            except TimeoutError:
+                failures.append(
+                    _failure(
+                        source_name,
+                        company_name,
+                        "timeout",
+                        f"source exceeded {per_source_timeout:g} seconds",
+                    )
+                )
+                continue
+        if kind != "ok":
+            failures.append(_inline_failure(source_name, company_name, payload, max_jobs_per_source))
+            continue
+        if not isinstance(payload, list) or not all(isinstance(job, Job) for job in payload):
+            failures.append(_failure(source_name, company_name, "malformed", "source returned malformed data"))
+            continue
+        if len(payload) > max_jobs_per_source:
+            failures.append(
+                _failure(source_name, company_name, "oversized", f"source exceeded {max_jobs_per_source} jobs")
+            )
+            continue
+        jobs.extend(payload)
+    return _publish_scan(
+        jobs,
+        failures,
+        observed_on=observed_on,
+        mode=mode,
+        output=output,
+        checkpoint_state=None,
+    )
+
+
+def _publish_scan(jobs, failures, *, observed_on, mode, output, checkpoint_state):
+    failures = sorted(
+        failures,
         key=lambda failure: (
             failure["source"].casefold(),
             failure["company"].casefold(),
             failure["category"],
-        )
+        ),
     )
-
     unique: dict[tuple[str, str], Job] = {}
     for job in sorted(jobs, key=_job_order):
         unique.setdefault(_job_key(job), job)

@@ -6,6 +6,14 @@ from typing import Any
 
 from job_radar.config import UserConfig
 from job_radar.domain.jobs import Job
+from job_radar.posting_country import location_matches_country
+
+
+SCORING_FIELDS = ("score", "summary", "risk", "tracks", "skills", "visa_supported")
+
+
+def is_hard_excluded(job: Job) -> bool:
+    return job.score == 0 and job.summary == "Excluded by local preferences."
 
 
 _AI_FIELDS = {
@@ -81,9 +89,16 @@ def score_jobs(jobs: Sequence[Job], config: UserConfig) -> list[Job]:
         matches: list[str] = []
         risks: list[str] = []
 
-        if job.country and job.country.casefold() in {
+        preferred_countries = {
             country.casefold() for country in config.preferences.countries
-        }:
+        }
+        country_match = bool(job.country) and job.country.casefold() in preferred_countries
+        if not country_match:
+            country_match = any(
+                location_matches_country(job.location, country)
+                for country in config.preferences.countries
+            )
+        if country_match:
             score += 10
             matches.append("country")
 
@@ -248,7 +263,7 @@ def score_jobs_with_provider(
             raise ValueError("AI response visa_supported must be boolean or null")
         tracks = _string_list(item, "tracks", current.tracks)
         skills = _string_list(item, "skills", current.skills)
-        if current.score == 0 and current.summary == "Excluded by local preferences.":
+        if is_hard_excluded(current):
             continue
         by_key[key] = replace(
             current,

@@ -29,16 +29,17 @@ deterministic local window is required.
 ### Runtime dependency boundary
 
 Pure scoring rules live in `job_radar.application` and depend only on the
-normalized job model and user configuration. The CLI composes concrete
-boundaries around them: `official_sources` selects Greenhouse, Lever, or Ashby;
-`legacy_command_adapter` owns the bounded external scoring command;
-`job_output` owns JSON file replacement; and Dashboard rendering remains a UI
-adapter. `public_workflow` receives scoring and repository behavior through
+normalized job model and user configuration. `job_radar.pipeline` composes the
+daily run around them: source orchestration selects Greenhouse, Lever, or
+Ashby through the adapters; `official_http` fetches their JSON; `documents`
+reads the jobs envelopes; `legacy_command_adapter` owns the bounded external
+scoring command; `job_output` owns JSON file replacement; and Dashboard
+rendering remains a UI adapter. The CLI parses arguments and prints reports.
+`public_workflow` receives scoring and repository behavior through
 callable or protocol ports instead of importing those concrete adapters.
 
 Local rules run first. A hard exclusion cannot be reversed by a model. Eligible
-jobs can receive fast review, while strong review is reserved for high-fit,
-near-threshold, visa-uncertain, or conflicting cases. AI output is advisory.
+jobs can receive fast review from the one configured provider. AI output is advisory.
 The operator makes the application decision.
 
 Review results use a versioned cache keyed by the stable job, JD hash, profile
@@ -77,8 +78,8 @@ batch, and rejected audit progress is persisted after the first decision,
 periodically in bounded batches, and at normal completion. An interrupted
 replay therefore retains an initial durable checkpoint while avoiding
 quadratic full-document rewrites for large rejected queues. Cache entries are
-kept for 30 days by default; rejected audit entries, including rescued
-decisions, are kept for 90 days by default. After date pruning, rejected
+kept for 30 days by default; rejected audit entries are kept for 90 days
+by default. After date pruning, rejected
 history is also limited to the newest deterministic 10,000 records and an
 8 MiB serialized document, whichever limit is reached first. Override
 `cache_retention_days` and
@@ -136,12 +137,12 @@ review. Browser status buttons persist in localStorage.
 ## 5. Export, delete, or sync
 
 Use `LocalTrackingStore.export_to` to export applications, events, lifecycle,
-and rejection data, plus existing optional Sheets outbox/review receipts, outside the managed root. Use
+and rejection data outside the managed root. Use
 `LocalTrackingStore.delete_tracking_data` to delete managed tracking, lifecycle,
-rejected, review cache, company-fact files and optional outbox/receipts. Exports, scans, and browser
+rejected, review cache, and company-fact files. Exports, scans, and browser
 localStorage require separate deletion.
 
-Cloudflare sync is optional. If you enable it, configure your own Worker,
+Cloudflare sync is optional and stays off the generated page unless `run` or `build-dashboard` is passed `--install-sync`. If you enable it, configure your own Worker,
 SQLite-backed Durable Object,
 and bearer token; then verify GET, POST, and DELETE with the versioned status
 contract. Do not treat the template as a shared hosted service.
@@ -237,103 +238,3 @@ HTTP error status/categories and network errors contain no raw upstream text.
 Connection timeouts use `network_timeout` in health while preserving `timeout`
 in the existing scan failure contract. Parent deadlines remain `timeout`.
 Diagnostics do not automatically retry; use a matching checkpoint and `--resume`.
-
-## 9. Record a version-bound review attestation
-
-```powershell
-job-radar --json review-receipt record --user-data user-data --jobs scans/latest.json --job-id JOB_ID --jd-sha256 JD_SHA256 --resume-sha256 RESUME_SHA256 --reviewer REVIEWER --evidence LOCAL_REVIEW_REFERENCE --decision approve --reviewed-at 2026-10-24T09:00:00+08:00 --confirm-reviewed
-job-radar --json review-receipt check --user-data user-data --jobs scans/latest.json --job-id JOB_ID --jd-sha256 JD_SHA256 --resume-sha256 RESUME_SHA256
-```
-
-Supply real 64-character lowercase hashes, not those placeholders. The CLI
-checks that the JD hash matches the saved job snapshot. The operator supplies
-the actual final resume digest; the CLI never opens that file. The explicit flag
-attests that review occurred, not that a provider finished. Latest reviewed time
-for the exact job/JD/resume governs; equal times prefer rejection. A matching
-rejection is applicable but not approved. Changing the JD or resume invalidates
-the old approval; historical receipts remain. Future review timestamps are
-refused. A receipt is neither cryptographic reviewer authentication nor permission
-to apply. No application automation is added.
-
-Daily `run` and saved-scan rebuilds consume these receipts when you explicitly
-select the intended final resume digest:
-
-```powershell
-job-radar --json run --resume-sha256 RESUME_SHA256
-job-radar --json build-dashboard --jobs scans/latest.json --output dashboard/public/index.html --user-data user-data --resume-sha256 RESUME_SHA256
-```
-
-The same selected digest applies to the displayed candidate list; use a separate
-run/build for a different resume. There is no automatic resume-file discovery or
-upload. Without the option, operator review is **pending: resume not selected**,
-even if a provider assessment completed. Missing JD evidence, changed JD/resume,
-absent receipts and future decisions cannot appear approved. A matching reject
-remains rejected. The CLI uses current UTC time for applicability, not the scan
-observation date. Provider reports keep their existing meaning and output shape;
-separate `operator_review` counts appear in `run` JSON and its execution receipt.
-The local execution receipt also records the selected digest (or null) and the
-aware applicability cutoff so that counts remain attributable to that run.
-The Dashboard displays derived status and receipt ID only, never private reviewer
-identity/evidence. It is not a submission gate or permission to apply, and its
-browser Applied button is still not confirmed application evidence. Projection
-never writes or creates approval receipts. Corrupt receipt state stops the build
-without replacing the last good Dashboard.
-
-## 10. Deliver a minimal snapshot to an owned Sheets tab
-
-This optional command is separate from `run` and Cloudflare. It does **not** map
-or modify an existing job master sheet. Precreate a dedicated tab with exactly
-nine grid columns, 2..1001 rows and these literal row-1 headers:
-
-```text
-job_id,payload_hash,company,title,url,status,applied_at,resume_version,confirmation_evidence
-```
-
-Use a private target owned by this single local writer. No other host, person or
-automation may concurrently edit it. Formulas/unknown rows, duplicate IDs,
-unexpected headers or capacity fail closed; the CLI does not repair them.
-
-```powershell
-job-radar --json sheet-sync enqueue --user-data user-data --jobs scans/latest.json --job-id JOB_ID --spreadsheet-id SHEET_ID --tab SyncTest
-job-radar --json sheet-sync status --user-data user-data
-job-radar --json sheet-sync deliver --user-data user-data --spreadsheet-id SHEET_ID --tab SyncTest --max-items 1 --confirm-write
-```
-
-Enqueue is local and defaults to `interested`, never `applied`.
-`--from-application` uses only an explicitly confirmed local application with
-actual submission time (or `unknown`), resume version and evidence. A browser
-marker is insufficient. Keep URLs canonical without query/fragment/userinfo;
-resume version is an identifier, not a private path. Unsupported text is refused,
-not silently sanitized. No personal notes or resume content are sent.
-
-Before delivery, securely provision your own `JOB_RADAR_SHEETS_ACCESS_TOKEN` in
-the environment with appropriate Google permissions. Do not paste it into a
-command, config, issue or chat. No token creation or login discovery is provided.
-Missing credentials/confirmation perform no request. Read
-[`privacy-and-data.md`](privacy-and-data.md) before authorizing disclosure.
-
-Each intent is saved before network access. Delivery reads the keyed row,
-rechecks its version before a fixed-range RAW write, and reads back before local
-acknowledgement. Retry after uncertain delivery reconciles an exact existing
-version without appending. Updates require `--expected-remote-hash` from a known
-acknowledged version. Conflicts block the target rather than overwriting it.
-This is single-writer idempotency, not distributed CAS or global exactly-once.
-Repeated enqueue of the current transition is write-free; after intervening
-acknowledged versions, a repeated transition gets a new bounded occurrence in
-local history so A-to-B-to-A-to-B cannot be mistaken for an old completed B.
-Earlier experimental outbox records without an occurrence remain readable.
-
-Default work is five items; `--max-items` allows 1..20, at most seven HTTP calls
-per fresh item. Each direct HTTP request has a 10-second socket timeout and
-4 MiB response limit. There is no hidden retry/backoff loop. Remote uncertainty
-remains pending for manual reconciliation up to three attempts; semantic failures
-block immediately. Wait/back off before retrying quota errors. A non-null error
-is a nonzero exit. The outbox retains at most 500 items including delivered
-receipts; export and reconcile explicitly, without silent history pruning.
-Local deletion never deletes an existing Google copy.
-
-Optional managed outbox/receipt files, their guards and parent directories must
-be unaliased local paths. Existing symlinks, junctions and hardlinked state/guards
-are refused before recording, export or deletion. This is not protection against
-an attacker replacing filesystem paths during an operation; keep user-data under
-exclusive local control.

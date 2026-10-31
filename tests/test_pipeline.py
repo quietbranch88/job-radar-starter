@@ -1,12 +1,11 @@
 import json
+from io import StringIO
 from pathlib import Path
 
-from job_radar.catalog import load_catalog
-from job_radar.config import load_user_config
-from job_radar.legacy_pipeline import run_pipeline
+from job_radar.cli import main
 
 
-def test_run_pipeline_scans_scores_writes_json_and_builds_dashboard(tmp_path: Path):
+def test_run_scans_scores_writes_json_and_builds_dashboard(tmp_path: Path):
     catalog_file = tmp_path / "catalog.yaml"
     catalog_file.write_text(
         """
@@ -62,33 +61,38 @@ matching:
 
     jobs_out = tmp_path / "scans" / "latest.json"
     dashboard_out = tmp_path / "dashboard" / "index.html"
-    rendered = {}
-
-    def fake_dashboard_renderer(jobs, output):
-        rendered["jobs"] = list(jobs)
-        rendered["output"] = output
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(
-            "<html><body><div id=\"swipeDeck\">Senior Go Backend Engineer</div></body></html>",
-            encoding="utf-8",
-        )
-
-    result = run_pipeline(
-        load_catalog(catalog_file),
-        load_user_config(profile_file),
+    stdout = StringIO()
+    code = main(
+        [
+            "--json",
+            "run",
+            "--catalog",
+            str(catalog_file),
+            "--profile",
+            str(profile_file),
+            "--jobs-output",
+            str(jobs_out),
+            "--dashboard-output",
+            str(dashboard_out),
+            "--user-data",
+            str(tmp_path / "user-data"),
+            "--aliases",
+            str(tmp_path / "missing-aliases.json"),
+            "--observed-on",
+            "2026-07-15",
+        ],
         get_json=fake_get_json,
-        jobs_output=jobs_out,
-        dashboard_output=dashboard_out,
-        dashboard_renderer=fake_dashboard_renderer,
+        stdout=stdout,
     )
 
-    jobs = json.loads(jobs_out.read_text(encoding="utf-8"))
-    assert result == {"scanned": 1, "published": 1}
-    assert jobs[0]["country"] == "CA"
-    assert jobs[0]["score"] >= 50
-    assert jobs[0]["external_id"] == "17"
-    assert rendered["output"] == dashboard_out
-    assert rendered["jobs"][0].title == "Senior Go Backend Engineer"
+    report = json.loads(stdout.getvalue())
+    payload = json.loads(jobs_out.read_text(encoding="utf-8"))
+    job = payload["jobs"][0]
     html = dashboard_out.read_text(encoding="utf-8")
+    assert code == 0
+    assert report["counts"] == {"scanned": 1, "published": 1}
+    assert job["country"] == "CA"
+    assert job["score"] >= 50
+    assert job["external_id"] == "17"
     assert "Senior Go Backend Engineer" in html
     assert 'id="swipeDeck"' in html

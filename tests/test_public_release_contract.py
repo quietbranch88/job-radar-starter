@@ -301,7 +301,6 @@ def test_operator_guide_covers_each_public_workflow_and_semantics():
         "incomplete",
         "hard exclusion",
         "fast review",
-        "strong review",
         "versioned cache",
         "rejected sample",
         "dashboard",

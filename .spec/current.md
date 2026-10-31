@@ -52,7 +52,7 @@ changes are Ship metadata actions, not runtime code changes.
 ### Compact AI review
 
 - Provider-neutral command boundary with strict short JSON Schema.
-- Fast review for eligible jobs and conditional strong-model escalation.
+- Fast review for eligible jobs from one configured provider.
 - Versioned cache keyed by stable job identity, JD hash, profile/rubric hash,
   prompt version, model, and mode.
 - Rejected queue and deterministic stratified quality sampling.
@@ -140,14 +140,15 @@ dashboard/CLI -> application -> domain <- data/adapters
 6. Stable identity, aliases, first/last seen, expiration, and legacy status-key
    migration behave deterministically across repeated and reordered scans.
 7. Compact AI review sends only documented minimal fields, validates strict
-   bounded JSON, routes only configured cases to strong review, never overrides
-   hard exclusions, and reports provider calls/cache hits/escalations.
+   bounded JSON, reviews eligible jobs with one configured provider, never
+   overrides hard exclusions, and reports provider calls, cache hits, and
+   escalations.
 8. Repeating review with an unchanged stable identity, JD hash, rubric/profile
    hash, prompt version, model, and mode produces a cache hit; changing any
    versioned input invalidates the relevant entry.
 9. Rejected jobs are retained locally with complete reason codes and a
-   deterministic stratified daily sample; disagreement can rescue a job without
-   silently deleting its audit history.
+   deterministic stratified daily sample. A provider rejection keeps that audit
+   record.
 10. Dashboard builds from the versioned public schema and visibly distinguishes
     complete, partial, loading, failed-source, rejected, stale, expired, and
     tracked states at desktop and mobile widths while preserving the existing

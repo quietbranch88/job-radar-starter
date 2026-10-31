@@ -100,7 +100,6 @@ def test_public_workflow_depends_on_injected_ports_not_concrete_adapters():
             "job_radar.job_output",
             "job_radar.legacy_command_adapter",
             "job_radar.legacy_scoring",
-            "job_radar.official_sources",
         }
     )
 
@@ -111,7 +110,6 @@ def test_concrete_adapter_modules_do_not_import_application_workflows_upward():
         "job_radar/bounded_process.py",
         "job_radar/job_output.py",
         "job_radar/legacy_command_adapter.py",
-        "job_radar/official_sources.py",
     ):
         tree = ast.parse(Path(relative).read_text(encoding="utf-8"))
         imported = {
