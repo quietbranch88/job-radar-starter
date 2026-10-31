@@ -1,3 +1,10 @@
+# Company boards Job Radar is allowed to read.
+# `job-radar init` copies this file to user-data/sources.yaml.
+# Replace every replace-with-your-board-* value with the board name from the
+# public careers URL, or delete that company:
+#   Greenhouse  boards.greenhouse.io/BOARD
+#   Lever       jobs.lever.co/BOARD
+#   Ashby       jobs.ashbyhq.com/BOARD
 countries:
   TW:
     name: Taiwan

@@ -1,5 +1,7 @@
+# Copied to user-data/profile.yaml by `job-radar init`.
+# Change the lists below. This file is preferences only.
+# Built-in commands do not open resume_path.
 profile:
-  # Keep the real file under gitignored user-data/.
   resume_path: user-data/resume.md
   skills:
     - Go

@@ -39,11 +39,14 @@ from job_radar.review_projection import project_review_receipts, validate_resume
 
 DEFAULT_CATALOG = Path("catalog/sources.yaml")
 DEFAULT_PROFILE = Path("user-data/profile.yaml")
+DEFAULT_USER_CATALOG = Path("user-data/sources.yaml")
+EXAMPLE_PROFILE = Path("config.example/profile.yaml")
 DEFAULT_JOBS = Path("scans/latest.json")
 DEFAULT_SCORED_JOBS = Path("scans/scored.json")
 DEFAULT_DASHBOARD = Path("dashboard/public/index.html")
 DEFAULT_USER_DATA = Path("user-data")
 DEFAULT_ALIASES = Path("user-data/aliases.json")
+PLACEHOLDER_BOARD_PREFIX = "replace-with-your-board"
 MAX_RESPONSE_BYTES = 50 * 1024 * 1024
 
 
@@ -86,6 +89,15 @@ def _parser() -> argparse.ArgumentParser:
     doctor.add_argument("--jobs-output", type=Path, default=DEFAULT_JOBS)
     doctor.add_argument("--dashboard-output", type=Path, default=DEFAULT_DASHBOARD)
     doctor.add_argument("--ai-command", nargs=argparse.REMAINDER)
+
+    init = commands.add_parser(
+        "init",
+        help="create local preference and company files for a first scan",
+    )
+    init.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
+    init.add_argument("--catalog", type=Path, default=DEFAULT_USER_CATALOG)
+    init.add_argument("--profile-example", type=Path, default=EXAMPLE_PROFILE)
+    init.add_argument("--catalog-example", type=Path, default=DEFAULT_CATALOG)
 
     catalog = commands.add_parser("catalog", help="inspect the public source catalog")
     catalog_commands = catalog.add_subparsers(dest="catalog_command", required=True)
@@ -447,21 +459,202 @@ def _command_ready(command: list[str] | None) -> dict[str, Any]:
     return {"mode": "external_command", "ready": found is not None, "executable": executable}
 
 
+def _placeholder_companies(catalog: Catalog) -> list[str]:
+    names = []
+    for name, company in catalog.companies.items():
+        source = catalog.sources.get(company.source)
+        if source is not None and not source.enabled:
+            continue
+        if company.board.startswith(PLACEHOLDER_BOARD_PREFIX):
+            names.append(name)
+    return sorted(names)
+
+
+def _copy_if_absent(source: Path, destination: Path) -> dict[str, Any]:
+    if destination.exists():
+        return {"path": str(destination.resolve()), "created": False}
+    if not source.is_file():
+        raise FileNotFoundError(f"example file is missing: {source}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+    return {"path": str(destination.resolve()), "created": True}
+
+
+def _init_local_files(args: argparse.Namespace) -> dict[str, Any]:
+    profile = _copy_if_absent(args.profile_example, args.profile)
+    catalog_file = _copy_if_absent(args.catalog_example, args.catalog)
+    placeholders: list[str] = []
+    try:
+        placeholders = _placeholder_companies(load_catalog(args.catalog))
+    except (OSError, ValueError):
+        placeholders = []
+    catalog_file["placeholders"] = placeholders
+    return {
+        "ok": True,
+        "operation": "init",
+        "profile": profile,
+        "catalog": catalog_file,
+    }
+
+
+def _shell_command(parts: list[str]) -> str:
+    return " ".join(shlex.quote(part) for part in parts)
+
+
+def _format_init(report: dict[str, Any]) -> str:
+    profile = report["profile"]
+    catalog = report["catalog"]
+    placeholders = list(catalog.get("placeholders") or [])
+    if profile["created"] or catalog["created"]:
+        opening = "Created the local files for a first scan. Existing files were left as they are."
+    else:
+        opening = "Local files are already present. Nothing was replaced."
+    lines = [
+        opening,
+        "",
+        f"Preferences: {profile['path']}",
+        "  Set countries, roles, and skills.",
+        f"Company boards: {catalog['path']}",
+    ]
+    if placeholders:
+        lines.extend(
+            (
+                f"  {len(placeholders)} boards still use replace-with-your-board-... placeholders.",
+                "  Put the board name from the public careers URL in each board field, or delete that company.",
+                "  Greenhouse uses boards.greenhouse.io/BOARD.",
+                "  Lever uses jobs.lever.co/BOARD.",
+                "  Ashby uses jobs.ashbyhq.com/BOARD.",
+            )
+        )
+    else:
+        lines.append("  Board names are already filled in.")
+    doctor = _shell_command(["job-radar", "doctor", "--catalog", catalog["path"]])
+    run = _shell_command(["job-radar", "run", "--catalog", catalog["path"]])
+    preview = _shell_command(
+        [
+            "job-radar",
+            "build-dashboard",
+            "--jobs",
+            "examples/jobs.example.json",
+            "--output",
+            "dashboard/public/index.html",
+        ]
+    )
+    lines.extend(
+        (
+            "",
+            "Then run:",
+            f"  {doctor}",
+            f"  {run}",
+            "Open dashboard/public/index.html when the scan finishes.",
+            "",
+            "To see the page before a live scan:",
+            f"  {preview}",
+        )
+    )
+    return "\n".join(lines)
+
+
+def _format_doctor(report: dict[str, Any]) -> str:
+    catalog = report["catalog"]
+    profile = report["profile"]
+    if report["ok"]:
+        run = _shell_command(["job-radar", "run", "--catalog", catalog["path"]])
+        dashboard = report["outputs"]["dashboard"]["path"]
+        return "\n".join(
+            (
+                "Ready to scan.",
+                "",
+                f"Catalog: {catalog.get('companies', 0)} companies",
+                f"  {catalog['path']}",
+                "Profile:",
+                f"  {profile['path']}",
+                "",
+                "Next:",
+                f"  {run}",
+                "Then open:",
+                f"  {dashboard}",
+            )
+        )
+
+    lines = ["Not ready to scan yet.", ""]
+    hint = catalog.get("hint")
+    if not catalog["ready"]:
+        if hint == "missing":
+            lines.append("Company list is missing.")
+            lines.append("  From the repository root, run: job-radar init")
+        elif hint == "placeholders":
+            count = len(catalog.get("placeholders") or [])
+            lines.append(f"Company list still has {count} placeholder boards.")
+            lines.append(f"  File: {catalog['path']}")
+            if Path(catalog["path"]).as_posix().endswith("catalog/sources.yaml"):
+                lines.append("  This file is the shared example. Run: job-radar init")
+                lines.append("  Then edit user-data/sources.yaml and pass it with --catalog.")
+            lines.append("  Replace each replace-with-your-board-... value with the board name from the public careers URL, or delete that company.")
+            lines.append("  Greenhouse uses boards.greenhouse.io/BOARD.")
+            lines.append("  Lever uses jobs.lever.co/BOARD.")
+            lines.append("  Ashby uses jobs.ashbyhq.com/BOARD.")
+        else:
+            lines.append(f"Company list: {catalog.get('error', 'could not be read')}")
+            lines.append(f"  File: {catalog['path']}")
+    if not profile["ready"]:
+        if profile.get("hint") == "missing":
+            lines.append("Preferences file is missing.")
+            lines.append("  From the repository root, run: job-radar init")
+            lines.append("  Then edit countries, roles, and skills in the preferences file it creates.")
+        else:
+            lines.append(f"Preferences: {profile.get('error', 'could not be read')}")
+            lines.append(f"  File: {profile['path']}")
+    for label, item in report["outputs"].items():
+        if not item["ready"]:
+            lines.append(f"{label} output directory is not writable.")
+            lines.append(f"  {item['path']}")
+    ai = report["ai"]
+    if not ai["ready"]:
+        lines.append(f"AI command was not found: {ai.get('executable', '')}")
+        lines.append("  Leave off --ai-command to score with local rules.")
+    catalog_path = catalog["path"]
+    if hint == "placeholders" and Path(catalog_path).as_posix().endswith("catalog/sources.yaml"):
+        catalog_path = str(DEFAULT_USER_CATALOG)
+    lines.extend(
+        (
+            "",
+            "When those are fixed, run:",
+            f"  {_shell_command(['job-radar', 'doctor', '--catalog', catalog_path])}",
+            f"  {_shell_command(['job-radar', 'run', '--catalog', catalog_path])}",
+        )
+    )
+    return "\n".join(lines)
+
+
 def _doctor(args: argparse.Namespace) -> dict[str, Any]:
     catalog_status: dict[str, Any] = {"path": str(args.catalog.resolve()), "ready": False}
     profile_status: dict[str, Any] = {"path": str(args.profile.resolve()), "ready": False}
     try:
         loaded_catalog = load_catalog(args.catalog)
+        placeholders = _placeholder_companies(loaded_catalog)
         catalog_status.update(
-            ready=True,
+            ready=not placeholders,
             sources=len(loaded_catalog.sources),
             companies=len(loaded_catalog.companies),
+            placeholders=placeholders,
         )
+        if placeholders:
+            catalog_status["hint"] = "placeholders"
+            catalog_status["error"] = (
+                f"{len(placeholders)} company boards still start with {PLACEHOLDER_BOARD_PREFIX}"
+            )
+    except FileNotFoundError:
+        catalog_status["error"] = "catalog file does not exist"
+        catalog_status["hint"] = "missing"
     except (OSError, ValueError) as error:
         catalog_status["error"] = str(error)
     try:
         load_user_config(args.profile)
         profile_status["ready"] = True
+    except FileNotFoundError:
+        profile_status["error"] = "profile file does not exist"
+        profile_status["hint"] = "missing"
     except (OSError, ValueError) as error:
         profile_status["error"] = str(error)
 
@@ -669,9 +862,20 @@ def main(
             _emit({'ok': True, 'operation': 'review-receipt.' + args.receipt_command, 'result': result},
                   as_json=args.json, stdout=stdout)
             return 0
+        if args.command == "init":
+            report = _init_local_files(args)
+            if args.json:
+                _emit(report, as_json=True, stdout=stdout)
+            else:
+                print(_format_init(report), file=stdout)
+            return 0
+
         if args.command == "doctor":
             report = _doctor(args)
-            _emit(report, as_json=args.json, stdout=stdout)
+            if args.json:
+                _emit(report, as_json=True, stdout=stdout)
+            else:
+                print(_format_doctor(report), file=stdout)
             return 0 if report["ok"] else 1
 
         if args.command == "catalog" and args.catalog_command == "list":

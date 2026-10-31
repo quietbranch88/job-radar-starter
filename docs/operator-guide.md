@@ -2,6 +2,8 @@
 
 ## 1. Initialize and scan
 
+First visit: from the repository root run `job-radar init`, edit the preferences and company files it names, then `job-radar doctor --catalog user-data/sources.yaml`. The shared `catalog/sources.yaml` file is a template whose board values start with `replace-with-your-board`. A live scan needs the board name from each company's public Greenhouse, Lever, or Ashby careers URL.
+
 Run `job-radar doctor`, then initialize the local tracking store through the
 tracking API or your agent/script adapter. Configure only official Greenhouse,
 Lever, or Ashby boards you are authorized to query.

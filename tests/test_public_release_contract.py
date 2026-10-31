@@ -432,6 +432,7 @@ def test_existing_cli_help_preserves_all_public_commands(capsys):
     output = capsys.readouterr().out
     for command in (
         "doctor",
+        "init",
         "catalog",
         "scan",
         "score",
