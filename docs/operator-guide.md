@@ -34,9 +34,11 @@ daily run around them: source orchestration selects Greenhouse, Lever, or
 Ashby through the adapters; `official_http` fetches their JSON; `documents`
 reads the jobs envelopes; `legacy_command_adapter` owns the bounded external
 scoring command; `job_output` owns JSON file replacement; and Dashboard
-rendering remains a UI adapter. The CLI parses arguments and prints reports.
-`public_workflow` receives scoring and repository behavior through
-callable or protocol ports instead of importing those concrete adapters.
+rendering remains a UI adapter. The CLI parses arguments and prints reports. `review_supervisor` runs the
+configured review in a child process and stops that process at the deadline.
+`public_workflow` projects scores, lifecycle, and the dashboard view, and
+receives scoring and repository behavior through callable or protocol ports
+instead of importing those concrete adapters.
 
 Local rules run first. A hard exclusion cannot be reversed by a model. Eligible
 jobs can receive fast review from the one configured provider. AI output is advisory.

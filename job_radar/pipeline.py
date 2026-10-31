@@ -17,16 +17,19 @@ from job_radar.catalog import load_catalog
 from job_radar.config import load_user_config
 from job_radar.dashboard import render_dashboard, render_dashboard_view_model
 from job_radar.data.tracking_store import LocalTrackingStore
-from job_radar.documents import atomic_write_json, load_jobs_document
+from job_radar.documents import atomic_write_json, job_items, load_jobs_document
 from job_radar.job_output import write_jobs_json
 from job_radar.legacy_scoring import LegacyCommandScorer, score_jobs_with_command
 from job_radar.local_state import writer_guard
 from job_radar.public_workflow import (
+    disabled_review_result,
     execute_public_workflow,
     project_application_tracking,
     view_model_from_document,
 )
 from job_radar.review_provider import ConfiguredExternalReviewRunner
+from job_radar.review_supervisor import run_review_runner_bounded
+from job_radar.tracking_commands import record_confirmed_application
 from job_radar.run_receipt import RunReceipt
 
 
@@ -258,3 +261,124 @@ def run_daily(
         if health_output is not None:
             report["source_health_output"] = str(health_output.resolve())
     return report
+
+
+def review_jobs_file(
+    *,
+    jobs: Path,
+    output: Path,
+    user_data: Path,
+    observed_on: str,
+    provider_command: Sequence[str] | None,
+    per_call_timeout: float,
+    total_review_deadline: float,
+    max_fast_calls: int,
+    review_runner: Callable[..., Any] | None,
+) -> dict[str, Any]:
+    raw = json.loads(jobs.read_text(encoding="utf-8"))
+    items = job_items(raw)
+    store = LocalTrackingStore(user_data.resolve())
+    store.initialize()
+    active_review_runner = review_runner or (
+        ConfiguredExternalReviewRunner(provider_command) if provider_command else None
+    )
+    if active_review_runner is not None:
+        result = run_review_runner_bounded(
+            active_review_runner,
+            items,
+            observed_on=observed_on,
+            repository=store,
+            per_call_timeout_seconds=per_call_timeout,
+            total_deadline_seconds=total_review_deadline,
+            max_fast_calls=max_fast_calls,
+        )
+        mode = "configured"
+    else:
+        result = disabled_review_result()
+        mode = "disabled"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "ok": True,
+        "operation": "review",
+        "mode": mode,
+        "counts": {
+            "cache_hits": result["report"]["cache_hits"],
+            "provider_calls": result["report"]["provider_calls"],
+            "reviewed": len(result["reviews"]),
+        },
+        "output": str(output.resolve()),
+    }
+
+
+def run_tracking(
+    *,
+    command: str,
+    user_data: Path,
+    output: Path | None = None,
+    from_dashboard: Path | None = None,
+    job_id: str | None = None,
+    applied_at: str | None = None,
+    resume_version: str | None = None,
+    channel: str | None = None,
+    confirmation_evidence: str | None = None,
+    confirmed_at: str | None = None,
+    confirm_submitted: bool = False,
+) -> dict[str, Any]:
+    store = LocalTrackingStore(user_data.absolute())
+    if command == "record-application":
+        if from_dashboard is None:
+            raise ValueError("dashboard export is required")
+        with from_dashboard.open("rb") as handoff:
+            content = handoff.read(8 * 1024 * 1024 + 1)
+        if len(content) > 8 * 1024 * 1024:
+            raise ValueError("dashboard export exceeds 8 MiB")
+        exported = json.loads(content.decode("utf-8"))
+        application = record_confirmed_application(
+            store,
+            dashboard_state=exported,
+            job_id=job_id,
+            applied_at=applied_at,
+            resume_version=resume_version,
+            channel=channel,
+            confirmation_evidence=confirmation_evidence,
+            confirmed_at=confirmed_at,
+            confirm_submitted=confirm_submitted,
+        )
+        return {
+            "ok": True,
+            "operation": "tracking.record-application",
+            "application_id": application["application_id"],
+            "job_id": application["job_id"],
+            "status": application["status"],
+        }
+    if command == "init":
+        paths = store.initialize()
+        return {
+            "ok": True,
+            "operation": "tracking.init",
+            "counts": {"documents": len(paths)},
+            "user_data": str(store.root),
+        }
+    if command == "export":
+        if output is None:
+            raise ValueError("tracking export output is required")
+        store.initialize()
+        destination = store.export_to(output)
+        return {
+            "ok": True,
+            "operation": "tracking.export",
+            "output": str(destination),
+        }
+    if command == "delete":
+        removed = store.delete_tracking_data()
+        return {
+            "ok": True,
+            "operation": "tracking.delete",
+            "counts": {"removed": len(removed)},
+            "user_data": str(store.root),
+        }
+    raise AssertionError(f"unhandled tracking command: {command}")

@@ -141,8 +141,7 @@ dashboard/CLI -> application -> domain <- data/adapters
    migration behave deterministically across repeated and reordered scans.
 7. Compact AI review sends only documented minimal fields, validates strict
    bounded JSON, reviews eligible jobs with one configured provider, never
-   overrides hard exclusions, and reports provider calls, cache hits, and
-   escalations.
+   overrides hard exclusions, and reports provider calls and cache hits.
 8. Repeating review with an unchanged stable identity, JD hash, rubric/profile
    hash, prompt version, model, and mode produces a cache hit; changing any
    versioned input invalidates the relevant entry.

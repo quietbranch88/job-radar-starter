@@ -141,7 +141,7 @@ def _review_result(*, failures=None) -> dict[str, Any]:
         "rejected_sample": [],
         "failures": [] if failures is None else failures,
         "company_facts_used": 0,
-        "report": {"provider_calls": 0, "cache_hits": 0, "escalations": 0},
+        "report": {"provider_calls": 0, "cache_hits": 0},
     }
 
 

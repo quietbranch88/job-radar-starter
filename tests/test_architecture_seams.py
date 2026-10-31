@@ -185,3 +185,11 @@ def test_daily_run_and_job_documents_live_outside_the_cli():
     assert "execute_public_workflow(" not in source
     assert "score_jobs_file(" in source
     assert "build_dashboard(" in source
+    assert "review_jobs_file(" in source
+    assert "run_tracking(" in source
+    assert "run_review_runner_bounded(" not in source
+    assert "record_confirmed_application(" not in source
+    import job_radar.public_workflow as workflow
+    import job_radar.review_supervisor as supervisor
+    assert workflow.run_review_runner_bounded is supervisor.run_review_runner_bounded
+    assert not hasattr(workflow, "_kill_worker_tree")

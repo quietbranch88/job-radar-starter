@@ -14,13 +14,15 @@ from typing import Any, TextIO
 
 from job_radar.catalog import Catalog, load_catalog
 from job_radar.config import load_user_config
-from job_radar.data.tracking_store import LocalTrackingStore
-from job_radar.documents import job_items
 from job_radar.official_http import http_get_json
-from job_radar.pipeline import RunReceiptSlot, build_dashboard, run_daily, score_jobs_file
-from job_radar.public_workflow import run_review_runner_bounded
-from job_radar.review_provider import ConfiguredExternalReviewRunner
-from job_radar.tracking_commands import record_confirmed_application
+from job_radar.pipeline import (
+    RunReceiptSlot,
+    build_dashboard,
+    review_jobs_file,
+    run_daily,
+    run_tracking,
+    score_jobs_file,
+)
 from job_radar.source_orchestration import (
     AtomicSourceScanFailed,
     scan_catalog_resilient,
@@ -724,114 +726,34 @@ def main(
             return 0
 
         if args.command == "review":
-            raw = json.loads(args.jobs.read_text(encoding="utf-8"))
-            items = job_items(raw)
-            store = LocalTrackingStore(args.user_data.resolve())
-            store.initialize()
-            active_review_runner = (
-                review_runner
-                or (
-                    ConfiguredExternalReviewRunner(args.provider_command)
-                    if args.provider_command
-                    else None
-                )
+            report = review_jobs_file(
+                jobs=args.jobs,
+                output=args.output,
+                user_data=args.user_data,
+                observed_on=args.observed_on,
+                provider_command=args.provider_command,
+                per_call_timeout=args.per_call_timeout,
+                total_review_deadline=args.total_review_deadline,
+                max_fast_calls=args.max_fast_calls,
+                review_runner=review_runner,
             )
-            if active_review_runner is not None:
-                result = run_review_runner_bounded(
-                    active_review_runner,
-                    items,
-                    observed_on=args.observed_on,
-                    repository=store,
-                    per_call_timeout_seconds=args.per_call_timeout,
-                    total_deadline_seconds=args.total_review_deadline,
-                    max_fast_calls=args.max_fast_calls,
-                )
-                mode = "configured"
-            else:
-                result = {
-                    "contract_version": 1,
-                    "reviews": [],
-                    "rejected": [],
-                    "rejected_sample": [],
-                    "failures": [],
-                    "company_facts_used": 0,
-                    "report": {
-                        "provider_calls": 0,
-                        "cache_hits": 0,
-                        "escalations": 0,
-                    },
-                }
-                mode = "disabled"
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(
-                json.dumps(result, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            _emit(
-                {
-                    "ok": True,
-                    "operation": "review",
-                    "mode": mode,
-                    "counts": {
-                        "cache_hits": result["report"]["cache_hits"],
-                        "escalations": result["report"]["escalations"],
-                        "provider_calls": result["report"]["provider_calls"],
-                        "reviewed": len(result["reviews"]),
-                    },
-                    "output": str(args.output.resolve()),
-                },
-                as_json=args.json,
-                stdout=stdout,
-            )
+            _emit(report, as_json=args.json, stdout=stdout)
             return 0
 
         if args.command == "tracking":
-            store = LocalTrackingStore(args.user_data.absolute())
-            if args.tracking_command == "record-application":
-                with args.from_dashboard.open("rb") as handoff:
-                    content = handoff.read(8 * 1024 * 1024 + 1)
-                if len(content) > 8 * 1024 * 1024:
-                    raise ValueError("dashboard export exceeds 8 MiB")
-                exported = json.loads(content.decode("utf-8"))
-                application = record_confirmed_application(
-                    store, dashboard_state=exported, job_id=args.job_id,
-                    applied_at=args.applied_at, resume_version=args.resume_version,
-                    channel=args.channel, confirmation_evidence=args.confirmation_evidence,
-                    confirmed_at=args.confirmed_at, confirm_submitted=args.confirm_submitted,
-                )
-                report = {
-                    "ok": True, "operation": "tracking.record-application",
-                    "application_id": application["application_id"],
-                    "job_id": application["job_id"], "status": application["status"],
-                }
-            elif args.tracking_command == "init":
-                paths = store.initialize()
-                report = {
-                    "ok": True,
-                    "operation": "tracking.init",
-                    "counts": {"documents": len(paths)},
-                    "user_data": str(store.root),
-                }
-            elif args.tracking_command == "export":
-                store.initialize()
-                destination = store.export_to(args.output)
-                report = {
-                    "ok": True,
-                    "operation": "tracking.export",
-                    "output": str(destination),
-                }
-            elif args.tracking_command == "delete":
-                removed = store.delete_tracking_data()
-                report = {
-                    "ok": True,
-                    "operation": "tracking.delete",
-                    "counts": {"removed": len(removed)},
-                    "user_data": str(store.root),
-                }
-            else:
-                raise AssertionError(
-                    f"unhandled tracking command: {args.tracking_command}"
-                )
+            report = run_tracking(
+                command=args.tracking_command,
+                user_data=args.user_data,
+                output=getattr(args, "output", None),
+                from_dashboard=getattr(args, "from_dashboard", None),
+                job_id=getattr(args, "job_id", None),
+                applied_at=getattr(args, "applied_at", None),
+                resume_version=getattr(args, "resume_version", None),
+                channel=getattr(args, "channel", None),
+                confirmation_evidence=getattr(args, "confirmation_evidence", None),
+                confirmed_at=getattr(args, "confirmed_at", None),
+                confirm_submitted=getattr(args, "confirm_submitted", False),
+            )
             _emit(report, as_json=args.json, stdout=stdout)
             return 0
         raise AssertionError(f"unhandled command: {args.command}")

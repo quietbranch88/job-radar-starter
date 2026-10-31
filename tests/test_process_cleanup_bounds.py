@@ -191,12 +191,12 @@ def test_bounded_process_cleanup_survives_taskkill_and_final_wait_stalls(
 def test_review_worker_cleanup_survives_taskkill_and_final_join_stalls(
     monkeypatch,
 ):
-    workflow = importlib.import_module("job_radar.public_workflow")
+    supervisor = importlib.import_module("job_radar.review_supervisor")
     process = _StubbornWorker()
-    monkeypatch.setattr(workflow, "os", SimpleNamespace(name="nt"))
-    monkeypatch.setattr(workflow.subprocess, "run", _timed_out_taskkill)
+    monkeypatch.setattr(supervisor, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(supervisor.subprocess, "run", _timed_out_taskkill)
 
-    workflow._kill_worker_tree(process)
+    supervisor._kill_worker_tree(process)
 
     assert process.killed is True
     assert process.join_timeouts
