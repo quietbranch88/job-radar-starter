@@ -52,7 +52,6 @@ class RecordingReviewRunner:
             "report": {
                 "provider_calls": 1,
                 "cache_hits": 0,
-                "escalations": 0,
             },
         }
 

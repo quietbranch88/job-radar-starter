@@ -147,7 +147,6 @@ class ConfiguredExternalReviewRunner:
     profile_rubric_hash: str = "public-local-profile-v1"
     prompt_version: str = "compact-review-v1"
     fast_model: str = "external-command-fast"
-    strong_model: str = "external-command-strong"
 
     def __init__(self, command: Sequence[str]):
         normalized = tuple(str(part) for part in command)
@@ -173,9 +172,6 @@ class ConfiguredExternalReviewRunner:
             config={
                 "contract_version": 1,
                 "minimum_fit": 1,
-                "near_threshold_margin": 5,
-                "strong_fit_threshold": 90,
-                "max_escalations": 10,
                 "max_request_bytes": 4096,
                 "max_evidence_items": 8,
                 "max_evidence_chars": 500,
@@ -183,7 +179,6 @@ class ConfiguredExternalReviewRunner:
                 "profile_rubric_hash": self.profile_rubric_hash,
                 "prompt_version": self.prompt_version,
                 "fast_model": self.fast_model,
-                "strong_model": self.strong_model,
                 "per_call_timeout_seconds": per_call_timeout_seconds,
                 "total_deadline_seconds": total_deadline_seconds,
                 "max_fast_calls": max_fast_calls,

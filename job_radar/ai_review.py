@@ -100,9 +100,6 @@ def _validate_config(config: Mapping[str, Any]) -> None:
         raise ValueError("review config has unsupported contract version")
     for field in (
         "minimum_fit",
-        "near_threshold_margin",
-        "strong_fit_threshold",
-        "max_escalations",
         "max_request_bytes",
         "max_evidence_items",
         "max_evidence_chars",
@@ -113,13 +110,10 @@ def _validate_config(config: Mapping[str, Any]) -> None:
             raise ValueError(f"{field} must be a positive integer")
     if not 0 <= config["minimum_fit"] <= 100:
         raise ValueError("minimum_fit must be between 0 and 100")
-    if not 0 <= config["strong_fit_threshold"] <= 100:
-        raise ValueError("strong_fit_threshold must be between 0 and 100")
     for field in (
         "profile_rubric_hash",
         "prompt_version",
         "fast_model",
-        "strong_model",
     ):
         _bounded_text(config.get(field), field, 256)
     for field in (
@@ -491,7 +485,6 @@ def run_review_pipeline(
     cache_checkpointed_this_run = False
     provider_calls = 0
     cache_hits = 0
-    escalations = 0
     company_facts_used = 0
     reviews: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
@@ -582,7 +575,7 @@ def run_review_pipeline(
     ) -> dict[str, Any] | None:
         nonlocal provider_calls, cache_hits, cache_changed, cache_dirty_count
         nonlocal fast_calls, fast_call_budget_exhausted, deadline_exhausted
-        model = config["fast_model"] if mode == "fast" else config["strong_model"]
+        model = config["fast_model"]
         key = review_cache_key(
             stable_id=job["stable_id"],
             jd_hash=_bounded_text(job.get("jd_hash"), "jd_hash", 256),
@@ -778,7 +771,6 @@ def run_review_pipeline(
     report = {
         "provider_calls": provider_calls,
         "cache_hits": cache_hits,
-        "escalations": escalations,
     }
     if safe_limits_enabled:
         report.update(

@@ -166,16 +166,12 @@ def _config(**overrides: Any) -> dict[str, Any]:
     config = {
         "contract_version": 1,
         "minimum_fit": 60,
-        "near_threshold_margin": 5,
-        "strong_fit_threshold": 80,
-        "max_escalations": 3,
         "max_request_bytes": 1200,
         "max_evidence_items": 3,
         "max_evidence_chars": 240,
         "profile_rubric_hash": "rubric-v1",
         "prompt_version": "prompt-v1",
         "fast_model": "fast-v1",
-        "strong_model": "strong-v1",
         "company_fact_ttl_days": 30,
     }
     config.update(overrides)
@@ -357,7 +353,7 @@ def test_single_provider_reviews_every_eligible_case(
     assert len(fast.calls) == 1
     assert result["reviews"][0]["decision"] == fast_response["decision"]
     assert result["reviews"][0].get("rescued") is not True
-    assert result["report"]["escalations"] == 0
+    assert "escalations" not in result["report"]
 
 
 def test_single_provider_reviews_every_eligible_job_in_fit_order(review: ModuleType):
@@ -371,7 +367,7 @@ def test_single_provider_reviews_every_eligible_job_in_fit_order(review: ModuleT
 
     result, _ = _run(review, list(reversed(jobs)), fast)
 
-    assert result["report"]["escalations"] == 0
+    assert "escalations" not in result["report"]
     assert [request["stable_id"] for _, request in fast.calls] == [
         "job_0",
         "job_1",
@@ -568,7 +564,7 @@ def test_single_provider_rejection_keeps_the_audit_without_rescue(
     assert audit[0]["rescued"] is False
 
 
-def test_report_counts_calls_cache_hits_and_escalations(review: ModuleType):
+def test_report_counts_calls_and_cache_hits(review: ModuleType):
     repository = FakeRepository()
     jobs = [_job("high", fit=85), _job("normal", fit=72)]
     fast = FakeProvider(
@@ -594,12 +590,10 @@ def test_report_counts_calls_cache_hits_and_escalations(review: ModuleType):
     assert first["report"] == {
         "provider_calls": 2,
         "cache_hits": 0,
-        "escalations": 0,
     }
     assert second["report"] == {
         "provider_calls": 0,
         "cache_hits": 2,
-        "escalations": 0,
     }
 
 
@@ -636,7 +630,6 @@ def test_cli_review_without_provider_is_no_network_and_reports_skipped(
     assert report["mode"] == "disabled"
     assert report["counts"] == {
         "cache_hits": 0,
-        "escalations": 0,
         "provider_calls": 0,
         "reviewed": 0,
     }

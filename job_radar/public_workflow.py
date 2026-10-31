@@ -51,7 +51,6 @@ def disabled_review_result() -> dict[str, Any]:
         "report": {
             "provider_calls": 0,
             "cache_hits": 0,
-            "escalations": 0,
         },
     }
 

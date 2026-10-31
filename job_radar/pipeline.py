@@ -307,7 +307,6 @@ def review_jobs_file(
         "mode": mode,
         "counts": {
             "cache_hits": result["report"]["cache_hits"],
-            "escalations": result["report"]["escalations"],
             "provider_calls": result["report"]["provider_calls"],
             "reviewed": len(result["reviews"]),
         },
