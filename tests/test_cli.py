@@ -1,4 +1,5 @@
 import json
+import shlex
 from io import StringIO
 from pathlib import Path
 
@@ -131,7 +132,7 @@ companies:
     text = stdout.getvalue()
     assert "Created the local files" in text
     assert "replace-with-your-board" in text
-    assert f"job-radar doctor --catalog {catalog}" in text
+    assert f"job-radar doctor --catalog {shlex.quote(str(catalog))}" in text
     assert profile.read_text(encoding="utf-8") == profile_example.read_text(encoding="utf-8")
 
     profile.write_text("profile: {skills: [Kept]}\n", encoding="utf-8")
