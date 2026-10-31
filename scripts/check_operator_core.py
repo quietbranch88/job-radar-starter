@@ -14,7 +14,7 @@ from pathlib import Path
 import re
 
 
-MODULES = ("local_state.py", "review_receipts.py", "sheet_sync.py", "sheets_transport.py")
+MODULES = ("local_state.py",)
 
 
 def _core(root: Path) -> Path:
@@ -27,10 +27,6 @@ def _core(root: Path) -> Path:
 
 def normalized_digest(path: Path) -> str:
     source = path.read_text(encoding="utf-8")
-    # Only this adapter-local import differs between the two layouts.
-    if path.name in ("review_receipts.py", "sheet_sync.py"):
-        source = re.sub(r"(?m)^from operator_state\.local_state import ",
-                        "from job_radar.local_state import ", source)
     return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 

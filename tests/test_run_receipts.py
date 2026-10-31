@@ -4,7 +4,7 @@ import json
 from io import StringIO
 from pathlib import Path
 
-from job_radar import cli
+from job_radar import pipeline
 from job_radar.cli import main
 
 
@@ -54,7 +54,7 @@ def test_run_persists_separate_stages_without_claiming_review_or_deployment(tmp_
 def test_failed_build_keeps_successful_scan_and_never_claims_completed_build(tmp_path: Path, monkeypatch):
     def broken_render(*args, **kwargs):
         raise OSError('synthetic renderer failure')
-    monkeypatch.setattr(cli, 'render_dashboard_view_model', broken_render)
+    monkeypatch.setattr(pipeline, 'render_dashboard_view_model', broken_render)
     output = StringIO()
     assert main(arguments(tmp_path), scan_runner=fake_scan, stdout=output) == 2
     receipt = json.loads((tmp_path / 'attempt.json').read_text(encoding='utf-8'))

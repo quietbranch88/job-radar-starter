@@ -16,14 +16,13 @@ from job_radar.ai_review import (
     DEFAULT_PER_CALL_TIMEOUT_SECONDS,
     DEFAULT_TOTAL_DEADLINE_SECONDS,
 )
-from job_radar.application import score_jobs
+from job_radar.application import SCORING_FIELDS, score_jobs
 from job_radar.config import UserConfig
 from job_radar.domain.jobs import Job
-from job_radar.domain.tracking import stable_job_id
+from job_radar.domain.tracking import dashboard_marker, stable_job_id
 from job_radar.lifecycle_merge import merge_scan_state, observation_as_of
 from job_radar.tracking_commands import build_metrics, due_actions
 from job_radar.windows_job import WindowsJob
-from job_radar.review_projection import ReceiptChecker, project_review_receipts, validate_resume_selection
 
 
 _TASKKILL_TIMEOUT_SECONDS = 1
@@ -232,13 +231,10 @@ def _dashboard_statuses(applications: Sequence[Mapping[str, Any]]) -> dict[str, 
         status = application.get("status")
         if not isinstance(job_id, str) or not isinstance(status, str):
             continue
-        normalized = status.casefold()
-        if normalized in {"interested", "applied"}:
-            statuses[job_id] = normalized
-        elif normalized in {"interview", "offer", "accepted"}:
-            statuses[job_id] = "applied"
-        elif normalized in {"rejected", "withdrawn"}:
-            statuses[job_id] = "skip"
+        try:
+            statuses[job_id] = dashboard_marker(status)
+        except ValueError:
+            continue
     return dict(sorted(statuses.items()))
 
 
@@ -266,11 +262,7 @@ def execute_public_workflow(
     total_deadline_seconds: float = DEFAULT_TOTAL_DEADLINE_SECONDS,
     max_fast_calls: int = DEFAULT_MAX_FAST_CALLS,
     on_stage: Callable[[str, str], None] | None = None,
-    receipt_checker: ReceiptChecker | None = None,
-    resume_sha256: str | None = None,
-    review_asof: str | None = None,
 ) -> dict[str, Any]:
-    validate_resume_selection(resume_sha256)
     """Persist all observations and project only threshold-eligible jobs.
 
     Counts distinguish current input observations (scanned) from the eligible
@@ -335,8 +327,8 @@ def execute_public_workflow(
         aliases=aliases,
         statuses=application_statuses,
     )
-    # This workflow explicitly rescores observations. Refresh the derived fields
-    # that the generic lifecycle merge otherwise preserves as curated values.
+    # This run's scores win for jobs in the scan. Merge keeps curated fields for
+    # history that was not observed again.
     scored_by_id: dict[str, dict[str, Any]] = {}
     identity_aliases = {**aliases["company_aliases"], **aliases["title_aliases"]}
     for item in sorted(
@@ -350,17 +342,11 @@ def execute_public_workflow(
             source=item["source"], external_id=item["external_id"],
             company=item["company"], title=item["title"], aliases=identity_aliases,
         )
-        candidate = scored_by_id.get(job_id)
-        if candidate is None or (candidate.get("last_seen") or observed_on) < (item.get("last_seen") or observed_on):
-            scored_by_id[job_id] = item
-    for item in lifecycle["jobs"]:
-        current = scored_by_id.get(item["stable_id"])
-        if current is not None and (current.get("last_seen") or observed_on) < item["last_seen"]:
-            del scored_by_id[item["stable_id"]]
+        scored_by_id[job_id] = item
     for item in lifecycle["jobs"]:
         current = scored_by_id.get(item["stable_id"])
         if current is not None:
-            for field in ("score", "summary", "risk", "tracks", "skills", "visa_supported"):
+            for field in SCORING_FIELDS:
                 item[field] = current[field]
     repository.write(
         "lifecycle",
@@ -436,9 +422,6 @@ def execute_public_workflow(
         if isinstance(item, dict) and isinstance(item.get("stable_id"), str)
     ]
     failures = scored_scan["failures"]
-    published, receipt_counts = project_review_receipts(
-        published, checker=receipt_checker, resume_sha256=resume_sha256, asof=review_asof,
-    )
     view_model = {
         "contract_version": 1,
         "scan": {
@@ -471,10 +454,92 @@ def execute_public_workflow(
             "mode": review_mode,
             "provider_calls": provider_calls,
         },
-        "operator_review": receipt_counts,
         "view_model": view_model,
         "counts": {
             "scanned": len(jobs),
             "published": len(published),
         },
     }
+
+
+def empty_tracking() -> dict[str, Any]:
+    return {
+        "statuses": {},
+        "metrics": {
+            "contract_version": 1,
+            "total": 0,
+            "funnel": {},
+            "rejection_stages": {},
+            "slices": {
+                "resume_version": {},
+                "channel": {},
+                "country": {},
+            },
+        },
+        "due_actions": [],
+    }
+
+
+def view_model_from_document(kind: str, raw: Any) -> dict[str, Any]:
+    if kind == "lifecycle":
+        return {
+            "contract_version": 1,
+            "scan": {
+                "state": "complete",
+                "mode": "atomic",
+                "incomplete": False,
+                "observed_on": "",
+                "failures": [],
+            },
+            "jobs": raw["jobs"],
+            "review": {"rejected": [], "sampled_rejected_ids": []},
+            "tracking": {**empty_tracking(), "statuses": raw["statuses"]},
+        }
+    if kind == "scan":
+        observed_on = raw.get("observed_on", "")
+        lifecycle = merge_scan_state(
+            prior_state={"contract_version": 1, "jobs": [], "statuses": {}},
+            scan_result=raw,
+            observed_on=observation_as_of(
+                observed_on,
+                raw["jobs"],
+                latest_observed_on=raw.get("latest_observed_on"),
+            ),
+            aliases={
+                "contract_version": 1,
+                "company_aliases": {},
+                "title_aliases": {},
+            },
+            statuses={},
+        ) if observed_on else {
+            "jobs": [
+                {
+                    **item,
+                    "stable_id": stable_job_id(
+                        source=item["source"],
+                        external_id=item["external_id"],
+                        company=item["company"],
+                        title=item["title"],
+                    ),
+                    "last_seen": "",
+                    "freshness": "active",
+                    "legacy_status_keys": [],
+                }
+                for item in raw["jobs"]
+            ],
+            "statuses": {},
+        }
+        return {
+            "contract_version": 1,
+            "scan": {
+                "state": "partial" if raw["incomplete"] else "complete",
+                "mode": raw["mode"],
+                "incomplete": raw["incomplete"],
+                "observed_on": observed_on,
+                "failures": raw["failures"],
+            },
+            "jobs": lifecycle["jobs"],
+            "review": {"rejected": [], "sampled_rejected_ids": []},
+            "tracking": {**empty_tracking(), "statuses": lifecycle["statuses"]},
+        }
+    raise ValueError("legacy input does not have a versioned Dashboard view model")

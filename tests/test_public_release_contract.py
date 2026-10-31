@@ -301,7 +301,6 @@ def test_operator_guide_covers_each_public_workflow_and_semantics():
         "incomplete",
         "hard exclusion",
         "fast review",
-        "strong review",
         "versioned cache",
         "rejected sample",
         "dashboard",
@@ -432,6 +431,7 @@ def test_existing_cli_help_preserves_all_public_commands(capsys):
     output = capsys.readouterr().out
     for command in (
         "doctor",
+        "init",
         "catalog",
         "scan",
         "score",

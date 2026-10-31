@@ -186,7 +186,6 @@ def _run(
     review: ModuleType,
     jobs: list[dict[str, Any]],
     fast: FakeProvider | None,
-    strong: FakeProvider | None = None,
     *,
     repository: FakeRepository | None = None,
     config: dict[str, Any] | None = None,
@@ -197,7 +196,6 @@ def _run(
         jobs=jobs,
         repository=repository,
         fast_provider=fast,
-        strong_provider=strong,
         config=config or _config(),
         observed_on=observed_on,
     )
@@ -317,12 +315,10 @@ def test_hard_exclusion_skips_provider_and_always_wins(review: ModuleType):
         hard_reason_codes=["excluded_company", "commission_only"],
     )
     fast = FakeProvider()
-    strong = FakeProvider()
 
-    result, repository = _run(review, [job], fast, strong)
+    result, repository = _run(review, [job], fast)
 
     assert fast.calls == []
-    assert strong.calls == []
     assert result["reviews"] == []
     assert result["rejected"][0]["reason_codes"] == [
         "commission_only",
@@ -333,42 +329,38 @@ def test_hard_exclusion_skips_provider_and_always_wins(review: ModuleType):
 
 
 @pytest.mark.parametrize(
-    ("job", "fast_response", "should_escalate"),
+    ("job", "fast_response"),
     [
-        (_job("high", fit=80), _response("high", score=84), True),
+        (_job("high", fit=80), _response("high", score=84)),
         (
             _job("visa", fit=72, visa_supported=None),
             _response("visa", score=76),
-            True,
         ),
-        (_job("near", fit=62), _response("near", score=63), True),
+        (_job("near", fit=62), _response("near", score=63)),
         (
             _job("conflict", fit=76),
             _response("conflict", decision="reject", score=40),
-            True,
         ),
-        (_job("normal", fit=72), _response("normal", score=74), False),
+        (_job("normal", fit=72), _response("normal", score=74)),
     ],
 )
-def test_strong_review_routes_only_configured_cases(
+def test_single_provider_reviews_every_eligible_case(
     review: ModuleType,
     job: dict[str, Any],
     fast_response: dict[str, Any],
-    should_escalate: bool,
 ):
     stable_id = job["stable_id"]
     fast = FakeProvider({("fast", stable_id): fast_response})
-    strong = FakeProvider(
-        {("strong", stable_id): _response(stable_id, score=88)}
-    )
 
-    result, _ = _run(review, [job], fast, strong)
+    result, _ = _run(review, [job], fast)
 
-    assert len(strong.calls) == int(should_escalate)
-    assert result["report"]["escalations"] == int(should_escalate)
+    assert len(fast.calls) == 1
+    assert result["reviews"][0]["decision"] == fast_response["decision"]
+    assert result["reviews"][0].get("rescued") is not True
+    assert result["report"]["escalations"] == 0
 
 
-def test_escalation_budget_is_deterministic_and_bounded(review: ModuleType):
+def test_single_provider_reviews_every_eligible_job_in_fit_order(review: ModuleType):
     jobs = [_job(f"job_{index}", fit=90 - index) for index in range(5)]
     fast = FakeProvider(
         {
@@ -376,25 +368,16 @@ def test_escalation_budget_is_deterministic_and_bounded(review: ModuleType):
             for job in jobs
         }
     )
-    strong = FakeProvider(
-        {
-            ("strong", job["stable_id"]): _response(job["stable_id"], score=90)
-            for job in jobs
-        }
-    )
 
-    result, _ = _run(
-        review,
-        list(reversed(jobs)),
-        fast,
-        strong,
-        config=_config(max_escalations=2),
-    )
+    result, _ = _run(review, list(reversed(jobs)), fast)
 
-    assert result["report"]["escalations"] == 2
-    assert [request["stable_id"] for _, request in strong.calls] == [
+    assert result["report"]["escalations"] == 0
+    assert [request["stable_id"] for _, request in fast.calls] == [
         "job_0",
         "job_1",
+        "job_2",
+        "job_3",
+        "job_4",
     ]
 
 
@@ -559,7 +542,7 @@ def test_rejected_queue_has_complete_reason_codes_and_deterministic_daily_sample
     ) != first
 
 
-def test_strong_disagreement_can_rescue_without_deleting_reject_audit(
+def test_single_provider_rejection_keeps_the_audit_without_rescue(
     review: ModuleType,
 ):
     job = _job("job_rescue", fit=76)
@@ -573,26 +556,16 @@ def test_strong_disagreement_can_rescue_without_deleting_reject_audit(
             )
         }
     )
-    strong = FakeProvider(
-        {
-            ("strong", "job_rescue"): _response(
-                "job_rescue",
-                decision="recommend",
-                score=83,
-                reason_codes=["evidence_supports_match"],
-            )
-        }
-    )
 
-    result, repository = _run(review, [job], fast, strong)
+    result, repository = _run(review, [job], fast)
 
-    assert result["reviews"][0]["decision"] == "recommend"
-    assert result["reviews"][0]["rescued"] is True
+    assert result["reviews"][0]["decision"] == "reject"
+    assert result["reviews"][0].get("rescued") is not True
     audit = repository.read("rejected")["items"]
     assert len(audit) == 1
     assert audit[0]["stable_id"] == "job_rescue"
     assert audit[0]["reason_codes"] == ["skill_gap"]
-    assert audit[0]["rescued"] is True
+    assert audit[0]["rescued"] is False
 
 
 def test_report_counts_calls_cache_hits_and_escalations(review: ModuleType):
@@ -604,32 +577,29 @@ def test_report_counts_calls_cache_hits_and_escalations(review: ModuleType):
             ("fast", "normal"): _response("normal"),
         }
     )
-    strong = FakeProvider({("strong", "high"): _response("high", score=91)})
 
     first, repository = _run(
         review,
         jobs,
         fast,
-        strong,
         repository=repository,
     )
     second, _ = _run(
         review,
         jobs,
         fast,
-        strong,
         repository=repository,
     )
 
     assert first["report"] == {
-        "provider_calls": 3,
+        "provider_calls": 2,
         "cache_hits": 0,
-        "escalations": 1,
+        "escalations": 0,
     }
     assert second["report"] == {
         "provider_calls": 0,
-        "cache_hits": 3,
-        "escalations": 1,
+        "cache_hits": 2,
+        "escalations": 0,
     }
 
 
@@ -724,7 +694,6 @@ def test_total_deadline_and_fast_call_budget_stop_deterministically(
         jobs=jobs,
         repository=FakeRepository(),
         fast_provider=provider,
-        strong_provider=None,
         config=_config(
             per_call_timeout_seconds=10,
             total_deadline_seconds=3,

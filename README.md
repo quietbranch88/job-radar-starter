@@ -4,7 +4,7 @@
 
 Find better roles from official ATS boards, score them transparently on your machine, and review them in a private dashboard.
 
-[Quick start](#quick-start) · [Privacy](#privacy) · [Docs](#docs)
+[First time here](#first-time-here) · [Privacy](#privacy) · [Docs](#docs)
 
 ## Why this exists
 
@@ -21,40 +21,75 @@ public job boards → normalized jobs → local scoring → review dashboard →
 - Atomic scans, bounded source concurrency, and JSON contracts for agents and scripts
 - No automatic applications, telemetry, or vendor lock-in
 
-## Agents and scripts
+## First time here
 
-Use the same CLI and JSON contracts with Claude, Codex, other agents, or normal scripts. Any agent or script can run readiness checks, scan official boards, score jobs, and build the dashboard; no agent subscription is required.
+You do not need an account. Job Radar runs on your computer, reads the public job boards you name, scores them with your rules, and opens a private page in your browser. Requires Python 3.11+.
 
-The optional [agent workflow adapter](.codex/skills/job-radar/SKILL.md) documents the CLI workflow. AI review is opt-in through a provider command you configure. See the [operator guide](docs/operator-guide.md) for command examples and the [external data contracts](docs/external-data-contracts.md) for the fields sent to that command.
+### 1. See the page before you configure anything
 
-## Quick start
+macOS and Linux:
 
-Requires Python 3.11+.
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+job-radar build-dashboard --jobs examples/jobs.example.json --output dashboard/public/index.html
+```
+
+Windows PowerShell:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-New-Item -ItemType Directory -Force user-data | Out-Null
-Copy-Item config.example\profile.yaml user-data\profile.yaml
-job-radar --json doctor
-job-radar --json run
-python -m http.server 8000 --directory dashboard\public
-```
-
-Open http://localhost:8000.
-
-Preview with example data:
-
-```powershell
 job-radar build-dashboard --jobs examples\jobs.example.json --output dashboard\public\index.html
 ```
 
-## Configure
+Open `dashboard/public/index.html`. The roles on that page are examples. The "New here?" note on the page explains the buttons. Interested, Applied, and Hide stay in the browser. Applied does not submit an application.
 
-Copy config.example/profile.yaml to user-data/profile.yaml, then set your countries, roles, skills, preferred companies, exclusions, and minimum score.
+### 2. Create your local files
+
+```bash
+job-radar init
+```
+
+This copies two files and leaves them alone if you run it again:
+
+- `user-data/profile.yaml` — countries, roles, and skills
+- `user-data/sources.yaml` — which company job boards to read
+
+Both stay on your machine. Do not commit them.
+
+### 3. Name the companies you want
+
+Open `user-data/sources.yaml`. It already names public boards for Airwallex, Cohere, Faire, GitLab, Monzo, OpenAI, and PayPay. Delete any company you do not want. Keep the `countries` and `sources` sections.
+
+To add a company, set `board` to the name in its public careers URL:
+
+- Greenhouse: `https://boards.greenhouse.io/BOARD` → `BOARD`
+- Lever: `https://jobs.lever.co/BOARD` → `BOARD`
+- Ashby: `https://jobs.ashbyhq.com/BOARD` → `BOARD`
+
+Open `user-data/profile.yaml` and change countries, roles, and skills. `minimum_score` hides lower matches from the dashboard. The scan still saves them.
 
 The local profile may point to a resume, but built-in components do not open or upload it.
+
+### 4. Scan, then open the same page
+
+```bash
+job-radar doctor --catalog user-data/sources.yaml
+job-radar run --catalog user-data/sources.yaml
+```
+
+`doctor` says what is still missing and the next command. `run` writes `scans/latest.json` and rebuilds `dashboard/public/index.html`. Open that file again.
+
+Scoring stays on your machine. You do not need an AI command. Add `--json` when a script or agent needs machine-readable output.
+
+## Agents and scripts
+
+Use the same CLI and JSON contracts with Claude, Codex, other agents, or normal scripts. Any agent or script can run readiness checks, scan official boards, score jobs, and build the dashboard; no agent subscription is required.
+
+The optional [agent workflow adapter](.codex/skills/job-radar/SKILL.md) documents the CLI workflow. AI review is opt-in through a provider command you configure. See the [operator guide](docs/operator-guide.md) for command examples and the [external data contracts](docs/external-data-contracts.md) for the fields sent to that command.
 
 ## Privacy
 
@@ -110,15 +145,8 @@ in the [operator guide](docs/operator-guide.md#6-preserve-observations-and-resum
 These are local capabilities, not automatic application submission or deployment.
 
 Optional source-health receipts distinguish cached observations from actual
-fetches and safe failure categories. Separate `review-receipt` commands record
-explicit job/JD/resume-hash attestations; provider completion is never approval.
-Daily `run --resume-sha256 HASH` and saved `build-dashboard` now project those
-receipts as separate operator-approved/rejected/pending states. No resume file is
-opened and no application is submitted. See the operator guide for version and
-time applicability.
-Opt-in `sheet-sync` uses a durable, readback-verified outbox on a dedicated owned
-Google Sheets tab, not an existing master-sheet migration. Both are disabled
-unless explicitly invoked; see the [operator guide](docs/operator-guide.md#8-diagnose-configured-sources)
+fetches and safe failure categories. They stay local unless a scan or run is
+given `--health-output`. See the [operator guide](docs/operator-guide.md#8-diagnose-configured-sources)
 and [privacy rules](docs/privacy-and-data.md).
 
 ## License

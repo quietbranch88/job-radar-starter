@@ -5,6 +5,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Mapping
 
 from job_radar.domain.tracking import (
+    dashboard_marker,
     freshness_state,
     parse_iso_date_or_datetime,
     stable_job_id,
@@ -268,23 +269,22 @@ def _migrate_statuses(
     statuses: Mapping[str, str],
     jobs: list[dict[str, Any]],
 ) -> dict[str, str]:
-    allowed = {"interested", "applied", "skip", "dead"}
+    normalized: dict[str, str] = {}
     for key, value in statuses.items():
         if not isinstance(key, str) or not isinstance(value, str):
             raise ValueError("statuses must map strings to strings")
-        if value.casefold() not in allowed:
-            raise ValueError(f"unsupported status: {value}")
+        normalized[key] = dashboard_marker(value)
     migrated: dict[str, str] = {}
     for job in jobs:
         stable_id = job["stable_id"]
-        if stable_id in statuses:
-            migrated[stable_id] = statuses[stable_id].casefold()
+        if stable_id in normalized:
+            migrated[stable_id] = normalized[stable_id]
             continue
         matches = sorted(
-            key for key in job["legacy_status_keys"] if key in statuses
+            key for key in job["legacy_status_keys"] if key in normalized
         )
         if matches:
-            migrated[stable_id] = statuses[matches[0]].casefold()
+            migrated[stable_id] = normalized[matches[0]]
     return dict(sorted(migrated.items()))
 
 

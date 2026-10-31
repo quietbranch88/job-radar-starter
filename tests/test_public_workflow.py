@@ -7,7 +7,8 @@ from typing import Any
 
 import pytest
 
-from job_radar.cli import _load_jobs, main
+from job_radar.cli import main
+from job_radar.documents import load_jobs
 from job_radar.data.tracking_store import LocalTrackingStore
 from job_radar.domain.tracking import stable_application_id, stable_job_id
 
@@ -168,7 +169,7 @@ def test_load_jobs_accepts_legacy_scan_and_lifecycle_contracts(
     tmp_path: Path,
     payload: object,
 ):
-    loaded = _load_jobs(_write_json(tmp_path / "jobs.json", payload))
+    loaded = load_jobs(_write_json(tmp_path / "jobs.json", payload))
 
     assert [(job.source, job.external_id) for job in loaded] == [
         ("greenhouse", "backend-1")

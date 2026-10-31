@@ -41,6 +41,8 @@ def test_dashboard_renders_normalized_jobs_without_private_profile(tmp_path: Pat
     assert "PRIVATE_OWNER_NAME" not in html
     assert "PRIVATE_DEPLOYMENT_HOST" not in html
     assert ".job-secret" not in html
+    assert 'data-theme="dark"' in html
+    assert "prefers-color-scheme" not in html
 
 
 def test_dashboard_has_a_useful_empty_state(tmp_path: Path):
@@ -49,7 +51,9 @@ def test_dashboard_has_a_useful_empty_state(tmp_path: Path):
 
     html = output.read_text(encoding="utf-8")
     assert "No jobs in this scan" in html
-    assert "Edit your local profile and company catalog" in html
+    assert "user-data/sources.yaml" in html
+    assert "job-radar run --catalog user-data/sources.yaml" in html
+    assert "New here? Three things this page does" in html
 
 
 def test_dashboard_rejects_non_http_job_links(tmp_path: Path):

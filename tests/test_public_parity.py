@@ -8,10 +8,11 @@ from pathlib import Path
 import pytest
 
 from job_radar.adapters import parse_ashby, parse_greenhouse, parse_lever
-from job_radar.cli import _load_jobs, _view_model_from_document, main
+from job_radar.cli import main
+from job_radar.documents import load_jobs
 from job_radar.config import Companies, Matching, Preferences, Profile, UserConfig
 from job_radar.data.tracking_store import LocalTrackingStore
-from job_radar.public_workflow import execute_public_workflow
+from job_radar.public_workflow import execute_public_workflow, view_model_from_document
 from job_radar.review_provider import compact_review_jobs
 from job_radar.tracking_commands import build_metrics, due_actions, record_application_event
 
@@ -66,7 +67,7 @@ def test_official_requirement_change_survives_storage_and_review(source, tmp_pat
     assert stored["jd_hash"] == second["jd_hash"]
     scan = tmp_path / "scan.json"
     scan.write_text(json.dumps(after["scan"]), encoding="utf-8")
-    reloaded = _load_jobs(scan)[0]
+    reloaded = load_jobs(scan)[0]
     assert asdict(reloaded)["jd_hash"] == second["jd_hash"]
     reviewed = compact_review_jobs([stored])[0]
     assert "Rust and SQLite" in " ".join(reviewed["jd_evidence"])
@@ -88,7 +89,7 @@ def test_jd_evidence_is_bounded_and_hashes_content_beyond_the_excerpt():
 def test_rendering_a_retained_scan_does_not_invent_a_new_observation(tmp_path):
     store = LocalTrackingStore(tmp_path / "state")
     saved = workflow(store, posting("ashby", "Required: Go."), "2026-07-17")["scan"]
-    model = _view_model_from_document("scan", saved)
+    model = view_model_from_document("scan", saved)
     assert model["jobs"][0]["last_seen"] == "2026-07-17"
     assert model["scan"]["observed_on"] == "2026-07-17"
 

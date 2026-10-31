@@ -23,79 +23,6 @@ def _csv_attr(values: Sequence[str]) -> str:
     return ",".join(value.strip().lower() for value in values if value.strip())
 
 
-def _job_card(job: Job) -> str:
-    source, company, title = map(escape, (job.source, job.company, job.title))
-    location = escape(job.location or "Location not specified")
-    country = escape(job.country or "other", quote=True)
-    category = escape(job.category or "other", quote=True)
-    tracks = escape(_csv_attr(job.tracks), quote=True)
-    skills = escape(_csv_attr(job.skills), quote=True)
-    first_seen = escape(job.first_seen or job.published_at, quote=True)
-    key = escape(_job_key(job), quote=True)
-    search = escape(
-        " ".join(
-            (
-                job.company,
-                job.title,
-                job.location,
-                job.category,
-                " ".join(job.tracks),
-                " ".join(job.skills),
-                job.summary,
-            )
-        ),
-        quote=True,
-    )
-    score = str(job.score) if job.score is not None else "—"
-    details = []
-    if job.salary:
-        details.append(f'<p class="salary">{escape(job.salary)}</p>')
-    if job.summary:
-        details.append(f'<p class="why"><b>Why it may fit</b>{escape(job.summary)}</p>')
-    if job.risk:
-        details.append(f'<p class="risk"><b>Check before applying</b>{escape(job.risk)}</p>')
-
-    tag_values = [job.source, job.category or "uncategorized", job.country or "location unknown"]
-    tag_values.extend(job.tracks)
-    tag_values.extend(job.skills)
-    tags = "".join(f'<span class="tag">{escape(value)}</span>' for value in dict.fromkeys(tag_values) if value)
-    visa = ""
-    if job.visa_supported is True:
-        visa = '<span class="signal visa">Visa support listed</span>'
-    elif job.visa_supported is False:
-        visa = '<span class="signal check">Work authorization required</span>'
-
-    url = _safe_url(job.url)
-    link = (
-        f'<a class="primary-link" href="{escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">Open official post <span aria-hidden="true">↗</span></a>'
-        if url
-        else '<span class="primary-link disabled" aria-disabled="true">Invalid source link</span>'
-    )
-    date = escape(job.first_seen or job.published_at or "Date not specified")
-
-    return f"""
-      <article class="job-card" data-key="{key}" data-source="{source}" data-country="{country}" data-category="{category}" data-tracks="{tracks}" data-skills="{skills}" data-first-seen="{first_seen}" data-search="{search}">
-        <div class="score" aria-label="Match score">{score}</div>
-        <div class="job-body">
-          <header class="job-heading">
-            <div><h3>{title}</h3><p class="company">{company} · {location}</p></div>
-            {visa}
-          </header>
-          <div class="tags">{tags}</div>
-          {''.join(details)}
-          <footer class="job-actions">
-            <div class="status-actions" aria-label="Tracking status">
-              <button type="button" data-state="interested">☆ Interested</button>
-              <button type="button" data-state="applied">✓ Applied</button>
-              <button type="button" data-state="skip">Hide</button>
-              <button type="button" data-state="dead">Expired</button>
-            </div>
-            <div class="source-actions">{link}<time>{date}</time></div>
-          </footer>
-        </div>
-      </article>"""
-
-
 def _view_job_card(job: Mapping[str, object], rejected_ids: set[str]) -> str:
     def text(field: str, default: str = "") -> str:
         value = job.get(field, default)
@@ -164,6 +91,8 @@ def _view_job_card(job: Mapping[str, object], rejected_ids: set[str]) -> str:
 def _operator_review_html(job: Mapping[str, object]) -> str:
     review = job.get('operator_review')
     review = review if isinstance(review, dict) else {}
+    if review.get('applicable') is not True and review.get('reason', 'resume_not_selected') == 'resume_not_selected':
+        return ""
     approved = review.get('applicable') is True and review.get('approved') is True and review.get('decision') == 'approve'
     rejected = review.get('applicable') is True and review.get('decision') == 'reject'
     label = 'approved' if approved else 'rejected' if rejected else 'pending'
@@ -194,7 +123,7 @@ _TEMPLATE = r"""<!doctype html>
     .command{position:sticky;top:0;z-index:10;margin:0 -12px;padding:14px 12px 12px;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(16px);border-bottom:1px solid var(--line)}.command-row{display:grid;grid-template-columns:auto minmax(220px,1fr);gap:16px;align-items:center}.view-switcher{display:flex;gap:3px;padding:3px;background:var(--surface);border:1px solid var(--line);border-radius:10px}.view-switcher button{border:0;background:transparent;color:var(--muted);padding:7px 12px;border-radius:7px;cursor:pointer;font-size:.82rem;transition:background .18s ease,color .18s ease}.view-switcher button.active{background:var(--surface-3);color:var(--text)}.search{position:relative}.search input{width:100%;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:10px;padding:10px 42px 10px 14px}.search input::placeholder{color:var(--faint)}.search kbd{position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--faint);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;font:500 .7rem ui-monospace,SFMono-Regular,Consolas,monospace}
     .filter-panel{padding:10px 0 0}.filter-panel summary{cursor:pointer;color:var(--muted);font-size:.8rem;width:max-content}.filter-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 18px;padding:14px 0 3px}.filter-group label{display:block;margin-bottom:5px;color:var(--faint);font-size:.7rem}.chips{display:flex;gap:5px;overflow-x:auto;padding:1px 1px 6px;scrollbar-width:thin}.chip{flex:0 0 auto;border:1px solid var(--line);background:transparent;color:var(--muted);padding:4px 9px;border-radius:999px;cursor:pointer;font-size:.72rem;transition:background .18s ease,border-color .18s ease,color .18s ease,transform .18s ease}.chip:hover{border-color:var(--faint);color:var(--text)}.chip:active{transform:scale(.97)}.chip.active{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 55%,var(--line));color:var(--accent)}
     .panel{padding-top:12px}.panel[hidden]{display:none}.tier-head{display:flex;align-items:baseline;justify-content:space-between;padding:17px 0 8px;border-bottom:1px solid var(--line)}.tier-head h2{margin:0;font-size:1rem}.tier-head span{color:var(--muted);font-size:.78rem}.job-list{display:grid}.load-more{display:block;margin:18px auto 0;min-height:44px}.job-card{display:grid;grid-template-columns:64px minmax(0,1fr);gap:19px;padding:22px 4px;border-bottom:1px solid var(--line);transition:background .18s ease,opacity .18s ease}.job-card:hover{background:color-mix(in srgb,var(--surface) 48%,transparent)}.job-card[data-status="skip"],.job-card[data-status="dead"]{opacity:.47}.score{padding-top:3px;text-align:right;color:var(--accent);font:750 1.55rem/1 ui-monospace,SFMono-Regular,Consolas,monospace;font-variant-numeric:tabular-nums}.job-heading{display:flex;justify-content:space-between;gap:14px;align-items:start}.job-heading h3{margin:0;font-size:1.08rem;line-height:1.3;letter-spacing:-.018em}.company{margin:4px 0 0;color:var(--muted);font-size:.86rem}.signal{flex:0 0 auto;padding:3px 7px;border-radius:4px;font-size:.68rem}.signal.visa{background:var(--green-soft);color:var(--green)}.signal.check{background:var(--red-soft);color:var(--red)}.tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}.tag{color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:2px 7px;font-size:.68rem}.salary{margin:11px 0 0;color:var(--green);font-weight:650}.why,.risk{margin:10px 0 0;max-width:76ch;font-size:.84rem}.why b,.risk b{display:block;margin-bottom:2px;color:var(--muted);font-size:.69rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase}.risk{color:var(--muted);border-left:2px solid color-mix(in srgb,var(--red) 50%,var(--line));padding-left:10px}.job-actions{display:flex;justify-content:space-between;gap:16px;align-items:end;margin-top:14px}.status-actions,.source-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.status-actions button{border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:.72rem;transition:background .18s ease,color .18s ease,border-color .18s ease,transform .18s ease}.status-actions button:hover{color:var(--text);border-color:var(--faint)}.status-actions button:active{transform:translateY(1px)}.status-actions button.active[data-state="interested"]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}.status-actions button.active[data-state="applied"]{background:var(--green-soft);color:var(--green);border-color:var(--green)}.status-actions button.active[data-state="skip"],.status-actions button.active[data-state="dead"]{background:var(--red-soft);color:var(--red);border-color:var(--red)}.primary-link{color:var(--blue);text-decoration:none;font-weight:650;font-size:.78rem}.primary-link:hover{text-decoration:underline}.primary-link.disabled{color:var(--faint)}time{color:var(--faint);font:500 .69rem ui-monospace,SFMono-Regular,Consolas,monospace}
-    .deck-shell{min-height:540px;display:grid;place-items:center;padding:34px 0}.swipe-card{position:relative;width:min(620px,100%);min-height:410px;background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:18px;padding:28px;box-shadow:0 22px 70px var(--shadow);cursor:grab;user-select:none;transition:transform .22s ease,opacity .22s ease}.swipe-card:active{cursor:grabbing}.swipe-card .score{position:absolute;right:25px;top:27px}.swipe-card h2{max-width:80%;margin:34px 0 5px;font-size:clamp(1.6rem,4vw,2.7rem);line-height:1.02;letter-spacing:-.045em}.swipe-company{margin:0;color:var(--muted)}.swipe-card .why{margin-top:26px;font-size:.94rem}.swipe-card .risk{margin-top:17px}.stamp{position:absolute;top:24px;left:24px;opacity:0;border:2px solid currentColor;border-radius:7px;padding:5px 9px;font-weight:800;transform:rotate(-7deg)}.stamp.nope{left:auto;right:24px;color:var(--red);transform:rotate(7deg)}.deck-actions{display:flex;justify-content:center;gap:10px;margin-top:20px}.deck-actions button{width:48px;height:48px;min-height:44px;border:1px solid var(--line);border-radius:50%;background:var(--surface);color:var(--muted);cursor:pointer;font-size:1.05rem;transition:transform .18s ease,border-color .18s ease,color .18s ease}.deck-actions button:hover{transform:translateY(-2px);border-color:var(--accent);color:var(--accent)}.deck-meta{text-align:center;color:var(--muted);font-size:.76rem;margin-top:12px}.matches-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding-top:14px}.match-card{background:var(--surface);border-top:2px solid var(--green);padding:18px}.match-card.applied{border-top-color:var(--blue)}.match-card h3{margin:0}.match-card p{margin:5px 0 12px;color:var(--muted);font-size:.82rem}.empty-state{grid-column:1/-1;padding:64px 24px;text-align:center;border:1px dashed var(--line);border-radius:14px;color:var(--muted)}.empty-state strong{display:block;color:var(--text);font-size:1.05rem;margin-bottom:6px}
+    .deck-shell{min-height:540px;display:grid;place-items:center;padding:34px 0}.swipe-card{position:relative;width:min(620px,100%);min-height:410px;background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:18px;padding:28px;box-shadow:0 22px 70px var(--shadow);cursor:grab;user-select:none;transition:transform .22s ease,opacity .22s ease}.swipe-card:active{cursor:grabbing}.swipe-card .score{position:absolute;right:25px;top:27px}.swipe-card h2{max-width:80%;margin:34px 0 5px;font-size:clamp(1.6rem,4vw,2.7rem);line-height:1.02;letter-spacing:-.045em}.swipe-company{margin:0;color:var(--muted)}.swipe-card .why{margin-top:26px;font-size:.94rem}.swipe-card .risk{margin-top:17px}.stamp{position:absolute;top:24px;left:24px;opacity:0;border:2px solid currentColor;border-radius:7px;padding:5px 9px;font-weight:800;transform:rotate(-7deg)}.stamp.nope{left:auto;right:24px;color:var(--red);transform:rotate(7deg)}.deck-actions{display:flex;justify-content:center;gap:10px;margin-top:20px}.deck-actions button{width:48px;height:48px;min-height:44px;border:1px solid var(--line);border-radius:50%;background:var(--surface);color:var(--muted);cursor:pointer;font-size:1.05rem;transition:transform .18s ease,border-color .18s ease,color .18s ease}.deck-actions button:hover{transform:translateY(-2px);border-color:var(--accent);color:var(--accent)}.deck-meta{text-align:center;color:var(--muted);font-size:.76rem;margin-top:12px}.matches-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding-top:14px}.match-card{background:var(--surface);border-top:2px solid var(--green);padding:18px}.match-card.applied{border-top-color:var(--blue)}.match-card h3{margin:0}.match-card p{margin:5px 0 12px;color:var(--muted);font-size:.82rem}.empty-state{grid-column:1/-1;padding:64px 24px;text-align:center;border:1px dashed var(--line);border-radius:14px;color:var(--muted)}.empty-state strong{display:block;color:var(--text);font-size:1.05rem;margin-bottom:6px}.empty-state code,.first-run code{color:var(--text);font-size:.85em}.first-run{margin:18px 0 0;border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:12px 14px}.first-run summary{cursor:pointer;font-weight:650}.first-run ol{margin:10px 0 0;padding-left:1.2rem;color:var(--muted)}.first-run li+li{margin-top:6px}
     .footer{display:flex;justify-content:space-between;gap:20px;margin-top:42px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:.74rem}.footer p{margin:0;max-width:70ch}
     @media(max-width:820px){.masthead{grid-template-columns:1fr}.header-actions{justify-self:start}.recommendations{grid-template-columns:1fr}.recommendation-list{grid-template-columns:1fr}.filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.matches-grid{grid-template-columns:1fr}}
     @media(max-width:620px){.shell{width:min(100% - 22px,1160px);padding-top:22px}.statbar{grid-template-columns:repeat(2,1fr)}.stat:nth-child(2){border-right:0}.stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.command{margin-inline:-11px}.scan-state{grid-template-columns:1fr}.tracking-grid{grid-template-columns:1fr}.command{margin-inline:0;padding-inline:0}.command-row{grid-template-columns:1fr}.view-switcher{width:100%}.view-switcher button{flex:1;padding-inline:6px;min-height:44px}.filter-grid{grid-template-columns:1fr}.chip,.status-actions button,.utility{min-height:44px}.job-card{grid-template-columns:42px minmax(0,1fr);gap:12px;padding-block:18px}.score{font-size:1.15rem}.job-heading{display:block}.signal{display:inline-block;margin-top:8px}.job-actions{align-items:start;flex-direction:column}.swipe-card{min-height:430px;padding:22px}.swipe-card h2{margin-top:45px}.footer{flex-direction:column}}
@@ -205,9 +134,10 @@ _TEMPLATE = r"""<!doctype html>
   <a class="skip-link" href="#workspace">Skip to job review</a>
   <main class="shell" id="workspace">
     <header class="masthead">
-      <div><p class="eyebrow">local-first / official sources</p><h1>Daily job review,<br>without the spreadsheet fog.</h1><p class="lede">Scan the strongest matches, inspect the trade-offs, and leave each role with a decision. Your profile and tracking history stay under your control.</p></div>
+      <div><p class="eyebrow">local-first / official sources</p><h1>Daily job review,<br>without the spreadsheet fog.</h1><p class="lede">Ranked roles from the boards you chose. Mark the ones you want, hide the rest, and open the official posting before you apply. This page stays on your computer.</p></div>
       <div class="header-actions"><button class="utility" id="exportStatus" type="button">Export status</button><button class="utility" id="exportDashboardState" data-testid="export-state" type="button">Export state</button><button class="utility" id="themeToggle" type="button" aria-label="Change color theme">Theme</button></div>
     </header>
+    <details class="first-run"><summary>New here? Three things this page does</summary><ol><li>The list is ranked from the last scan. Interested, Applied, Hide, and Expired stay in this browser.</li><li>Applied is a note to yourself. It does not submit an application.</li><li>Open the official post before you decide. An empty list means the company board names are still placeholders. Run <code>job-radar init</code>, edit <code>user-data/sources.yaml</code>, then <code>job-radar run --catalog user-data/sources.yaml</code>.</li></ol></details>
 __SCAN_STATE__
     <section class="statbar" aria-label="Scan summary"><div class="stat"><strong id="visibleCount">__JOB_COUNT__</strong><span>visible roles</span></div><div class="stat"><strong id="pendingCount">__JOB_COUNT__</strong><span>to review</span></div><div class="stat"><strong id="matchCount">0</strong><span>saved matches</span></div><div class="stat"><strong id="sourceCount">__SOURCE_COUNT__</strong><span>official sources</span></div></section>
 __TRACKING_SUMMARY__
@@ -259,12 +189,12 @@ __REJECTED_AUDIT__
     function jobCardMarkup(job){const key=jobKey(job),url=safeUrl(job.url),freshness=job.freshness||'active',review=rejectedIds.has(job.stable_id)?'rejected':'accepted',visa=job.visa_supported===true?'<span class="signal visa">Visa support listed</span>':job.visa_supported===false?'<span class="signal check">Work authorization required</span>':'',tags=[job.source,job.category||'uncategorized',job.country||'location unknown',...list(job.tracks),...list(job.skills),freshness].filter(Boolean).filter((value,index,items)=>items.indexOf(value)===index).map(value=>`<span class="tag">${esc(value)}</span>`).join(''),link=url?`<a class="primary-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open official post <span aria-hidden="true">↗</span></a>`:'<span class="primary-link disabled" aria-disabled="true">Invalid source link</span>',seen=job.first_seen||job.published_at||'Date not specified';return `<article class="job-card" data-testid="job-card" data-key="${esc(key)}" data-source="${esc(job.source)}" data-country="${esc(job.country||'other')}" data-category="${esc(job.category||'other')}" data-tracks="${esc(list(job.tracks).join(','))}" data-skills="${esc(list(job.skills).join(','))}" data-first-seen="${esc(seen)}" data-freshness="${esc(freshness)}" data-review-state="${review}"><div class="score" aria-label="Match score">${esc(job.score??'—')}</div><div class="job-body"><header class="job-heading"><div><h3>${esc(job.title)}</h3><p class="company">${esc(job.company)} · ${esc(job.location||'Location not specified')}</p></div>${visa}</header><div class="tags">${tags}</div>${detailMarkup(job)}<footer class="job-actions"><div class="status-actions" aria-label="Tracking status"><button type="button" data-state="interested">☆ Interested</button><button type="button" data-state="applied">✓ Applied</button><button type="button" data-state="skip">Hide</button><button type="button" data-state="dead">Expired</button></div><div class="source-actions">${link}<time>${esc(seen)}</time></div></footer></div></article>`}
     function paintCard(card){const job=byKey.get(card.dataset.key),status=job?statusOf(job):'';card.dataset.status=status;card.querySelectorAll('[data-state]').forEach(button=>{button.classList.toggle('active',button.dataset.state===status);button.disabled=Boolean(DASHBOARD.tracking.statuses[card.dataset.key])})}
     function bindCards(){cards=[...document.querySelectorAll('.job-card')];cards.forEach(card=>{paintCard(card);card.querySelectorAll('[data-state]').forEach(button=>button.addEventListener('click',()=>setStatus(byKey.get(card.dataset.key),button.dataset.state)))})}
-    function renderList(){const visible=visibleJobs(),rendered=visible.slice(0,renderLimit),root=document.querySelector('#jobList'),loadMore=document.querySelector('#loadMoreJobs');root.innerHTML=rendered.length?rendered.map(jobCardMarkup).join(''):'<section class="empty-state"><strong>No jobs match these filters</strong>Clear a filter or import a new scan.</section>';bindCards();document.querySelector('#visibleCount').textContent=visible.length;const remaining=Math.max(0,visible.length-rendered.length);loadMore.hidden=remaining===0;if(remaining){const count=Math.min(PAGE_SIZE,remaining);loadMore.textContent=`Load ${count} more jobs`;loadMore.setAttribute('aria-label',`Load ${count} more jobs, ${remaining} remaining`)}}
+    function renderList(){const visible=visibleJobs(),rendered=visible.slice(0,renderLimit),root=document.querySelector('#jobList'),loadMore=document.querySelector('#loadMoreJobs');const emptyScan=JOBS.length?'<section class="empty-state"><strong>No jobs match these filters</strong>Clear a filter or import a new scan.</section>':'<section class="empty-state"><strong>No jobs in this scan</strong>Replace each placeholder board in user-data/sources.yaml, then run <code>job-radar run --catalog user-data/sources.yaml</code>.</section>';root.innerHTML=rendered.length?rendered.map(jobCardMarkup).join(''):emptyScan;bindCards();document.querySelector('#visibleCount').textContent=visible.length;const remaining=Math.max(0,visible.length-rendered.length);loadMore.hidden=remaining===0;if(remaining){const count=Math.min(PAGE_SIZE,remaining);loadMore.textContent=`Load ${count} more jobs`;loadMore.setAttribute('aria-label',`Load ${count} more jobs, ${remaining} remaining`)}}
     function renderStats(){const pending=pendingJobs().length,matchesCount=JOBS.filter(job=>['interested','applied'].includes(statusOf(job))).length;document.querySelector('#pendingCount').textContent=pending;document.querySelector('#matchCount').textContent=matchesCount}
-    function renderRecommendations(){const picks=JOBS.filter(job=>!statusOf(job)).sort((a,b)=>(b.score??-1)-(a.score??-1)).slice(0,3),root=document.querySelector('#recommendations');root.innerHTML=picks.length?picks.map((job,index)=>`<article class="recommendation"><span class="rank">0${index+1} · ${esc(job.score??'—')} match</span><strong>${esc(job.title)}</strong><span>${esc(job.company)} · ${esc(job.location||job.country)}</span></article>`).join(''):'<div class="recommendation empty">No unhandled roles remain in this scan.</div>'}
+    function renderRecommendations(){const picks=JOBS.filter(job=>!statusOf(job)).sort((a,b)=>(b.score??-1)-(a.score??-1)).slice(0,3),root=document.querySelector('#recommendations');root.innerHTML=picks.length?picks.map((job,index)=>`<article class="recommendation"><span class="rank">0${index+1} · ${esc(job.score??'—')} match</span><strong>${esc(job.title)}</strong><span>${esc(job.company)} · ${esc(job.location||job.country)}</span></article>`).join(''):(JOBS.length?'<div class="recommendation empty">No unhandled roles remain in this scan.</div>':'<div class="recommendation empty">No roles yet. Replace the placeholder company boards, then scan again.</div>')}
     function rejectedAuditMarkup(item){return `<div class="rejected-item" data-review-state="rejected"><b>${esc(item.stable_id)}</b> · ${list(item.reason_codes).map(esc).join(', ')}</div>`}
     function renderRejectedAudit(){const root=document.querySelector('#rejectedAuditItems'),loadMore=document.querySelector('#loadMoreRejected');if(!root||!loadMore)return;const rendered=DASHBOARD.review.rejected.slice(0,rejectedRenderLimit);root.innerHTML=rendered.map(rejectedAuditMarkup).join('');const remaining=DASHBOARD.review.rejected.length-rendered.length;loadMore.hidden=remaining<=0;if(remaining>0){const count=Math.min(REJECTED_PAGE_SIZE,remaining);loadMore.textContent=`Load ${count} more rejected`;loadMore.setAttribute('aria-label',`Load ${count} more rejected jobs, ${remaining} remaining`)}}
-    function operatorReviewMarkup(job){const r=job.operator_review||{},approved=r.applicable===true&&r.approved===true&&r.decision==='approve',rejected=r.applicable===true&&r.decision==='reject',label=approved?'approved':rejected?'rejected':'pending',reason=String(r.reason||'resume_not_selected').replaceAll('_',' ');return `<p class="tag" data-operator-review="${label}">Operator review: ${label}${label==='pending'?' · '+esc(reason):''}</p>`}
+    function operatorReviewMarkup(job){const r=job.operator_review;if(!r||typeof r!=='object'||(r.applicable!==true&&(r.reason||'resume_not_selected')==='resume_not_selected'))return '';const approved=r.applicable===true&&r.approved===true&&r.decision==='approve',rejected=r.applicable===true&&r.decision==='reject',label=approved?'approved':rejected?'rejected':'pending',reason=String(r.reason||'resume_not_selected').replaceAll('_',' ');return `<p class="tag" data-operator-review="${label}">Operator review: ${label}${label==='pending'?' · '+esc(reason):''}</p>`}
     function detailMarkup(job){return `${operatorReviewMarkup(job)}${job.salary?`<p class="salary">${esc(job.salary)}</p>`:''}${job.summary?`<p class="why"><b>Why it may fit</b>${esc(job.summary)}</p>`:''}${job.risk?`<p class="risk"><b>Check before applying</b>${esc(job.risk)}</p>`:''}`}
     function renderDeck(){const root=document.querySelector('#swipeDeck'),deck=pendingJobs();if(!deck.length){root.innerHTML='<div class="empty-state"><strong>Review queue complete</strong>Change a filter, clear a previous status, or import a new scan.</div>';return}const job=deck[0],url=safeUrl(job.url);root.innerHTML=`<article class="swipe-card" id="topSwipeCard" tabindex="-1"><span class="stamp like">INTERESTED</span><span class="stamp nope">HIDE</span><div class="score">${esc(job.score??'—')}</div><p class="eyebrow">${esc(job.source)} / ${esc(job.country||'other')}</p><h2>${esc(job.title)}</h2><p class="swipe-company">${esc(job.company)} · ${esc(job.location)}</p><div class="tags">${[job.category,...list(job.tracks),...list(job.skills)].filter(Boolean).map(value=>`<span class="tag">${esc(value)}</span>`).join('')}</div>${detailMarkup(job)}${url?`<p><a class="primary-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open official post ↗</a></p>`:''}</article><div class="deck-actions"><button type="button" data-deck="undo" aria-label="Undo">↩</button><button type="button" data-state="skip" aria-label="Hide">×</button><button type="button" data-state="dead" aria-label="Mark expired">!</button><button type="button" data-state="applied" aria-label="Mark applied">✓</button><button type="button" data-state="interested" aria-label="Mark interested">☆</button></div><p class="deck-meta">${deck.length} left · ← hide · → interested · ↑ applied</p>`;root.querySelectorAll('[data-state]').forEach(button=>button.addEventListener('click',()=>setStatus(job,button.dataset.state)));root.querySelector('[data-deck="undo"]').addEventListener('click',undo);attachSwipe(root.querySelector('#topSwipeCard'),job)}
     function attachSwipe(card,job){let start=0,delta=0,dragging=false;card.addEventListener('pointerdown',event=>{start=event.clientX;delta=0;dragging=true;card.setPointerCapture(event.pointerId)});card.addEventListener('pointermove',event=>{if(!dragging)return;delta=event.clientX-start;card.style.transform=`translateX(${delta}px) rotate(${delta/30}deg)`;card.querySelector('.stamp.like').style.opacity=Math.max(0,delta/100);card.querySelector('.stamp.nope').style.opacity=Math.max(0,-delta/100)});card.addEventListener('pointerup',()=>{dragging=false;if(Math.abs(delta)>110)setStatus(job,delta>0?'interested':'skip');else{card.style.transform='';card.querySelectorAll('.stamp').forEach(stamp=>stamp.style.opacity=0)}})}
@@ -289,7 +219,7 @@ __REJECTED_AUDIT__
     document.addEventListener('keydown',event=>{if(event.key==='/'&&document.activeElement!==document.querySelector('#searchBox')){event.preventDefault();document.querySelector('#searchBox').focus()}if(activeView!=='deck'||['INPUT','BUTTON','A'].includes(document.activeElement.tagName))return;const job=pendingJobs()[0];if(!job)return;if(event.key==='ArrowLeft')setStatus(job,'skip');if(event.key==='ArrowRight')setStatus(job,'interested');if(event.key==='ArrowUp')setStatus(job,'applied')});
     document.querySelector('#exportStatus').addEventListener('click',()=>{const blob=new Blob([JSON.stringify({exported_at:new Date().toISOString(),statuses:state},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='job-radar-status.json';link.click();URL.revokeObjectURL(url)});
     document.querySelector('#exportDashboardState').addEventListener('click',()=>{const blob=new Blob([JSON.stringify({contract_version:1,exported_at:new Date().toISOString(),statuses:state,tracking:DASHBOARD.tracking},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='job-radar-state.json';link.click();URL.revokeObjectURL(url)});
-    const root=document.documentElement,savedTheme=localStorage.getItem('job-radar-theme');if(savedTheme)root.dataset.theme=savedTheme;else if(matchMedia('(prefers-color-scheme: light)').matches)root.dataset.theme='light';document.querySelector('#themeToggle').addEventListener('click',()=>{root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';localStorage.setItem('job-radar-theme',root.dataset.theme)});
+    const root=document.documentElement,savedTheme=localStorage.getItem('job-radar-theme');if(savedTheme==='light'||savedTheme==='dark')root.dataset.theme=savedTheme;document.querySelector('#themeToggle').addEventListener('click',()=>{root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';localStorage.setItem('job-radar-theme',root.dataset.theme)});
     renderRejectedAudit();
     renderAll();
   </script>
@@ -433,6 +363,8 @@ def _rejected_html(review: Mapping[str, object]) -> str:
 def render_dashboard_view_model(
     view_model: Mapping[str, object],
     output: Path,
+    *,
+    install_sync: bool = False,
 ) -> None:
     model = deepcopy(_validate_view_model(view_model))
     jobs = model["jobs"]
@@ -451,7 +383,7 @@ def render_dashboard_view_model(
     )
     cards = "\n".join(_view_job_card(job, rejected_ids) for job in ordered_jobs[:50])
     if not cards:
-        cards = '<section class="empty-state"><strong>No jobs in this scan</strong>Edit your local profile and company catalog, then run the scanner again.</section>'
+        cards = '<section class="empty-state"><strong>No jobs in this scan</strong>Replace each placeholder board in user-data/sources.yaml, then run <code>job-radar run --catalog user-data/sources.yaml</code>.</section>'
     payload_jobs = []
     for job in ordered_jobs:
         item = dict(job)
@@ -502,7 +434,8 @@ def render_dashboard_view_model(
         .replace("__TRACKING_SUMMARY__", _tracking_html(model["tracking"]))  # type: ignore[arg-type]
         .replace("__REJECTED_AUDIT__", _rejected_html(review))  # type: ignore[arg-type]
     )
-    html = install_optional_sync(html)
+    if install_sync:
+        html = install_optional_sync(html)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(html, encoding="utf-8")
 

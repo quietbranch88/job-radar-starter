@@ -1,3 +1,12 @@
+# Public job boards carried over from the private edition's company list.
+# `job-radar init` copies this file to user-data/sources.yaml.
+# Board values are the public Greenhouse or Ashby names. Delete a company
+# you do not want, or add one with the name from its careers URL:
+#   Greenhouse  boards.greenhouse.io/BOARD
+#   Lever       jobs.lever.co/BOARD
+#   Ashby       jobs.ashbyhq.com/BOARD
+# A company listed in more than one country keeps each posting's own location.
+# The scan does not relabel every role with a single country.
 countries:
   TW:
     name: Taiwan
@@ -23,6 +32,9 @@ countries:
   NL:
     name: Netherlands
     sources: [greenhouse, lever, ashby]
+  US:
+    name: United States
+    sources: [greenhouse, lever, ashby]
   REMOTE:
     name: Global Remote
     sources: [greenhouse, lever, ashby]
@@ -42,31 +54,31 @@ sources:
     enabled: true
 
 companies:
-  Northstar Robotics:
-    countries: [JP]
+  Airwallex:
+    countries: [SG, US]
+    source: ashby
+    board: airwallex
+  Cohere:
+    countries: [CA, US]
+    source: ashby
+    board: cohere
+  Faire:
+    countries: [US, CA]
     source: greenhouse
-    board: replace-with-your-board-token
-  Cedarline Systems:
+    board: faire
+  GitLab:
     countries: [REMOTE]
     source: greenhouse
-    board: replace-with-your-board-token
-  Harbour Labs:
-    countries: [CA]
-    source: greenhouse
-    board: replace-with-your-board-token
-  Alder Finance:
+    board: gitlab
+  Monzo:
     countries: [GB]
     source: greenhouse
-    board: replace-with-your-board-token
-  Meridian Works:
-    countries: [GB]
+    board: monzo
+  OpenAI:
+    countries: [US, SG, JP, GB]
     source: ashby
-    board: replace-with-your-board-name
-  Lantern Cloud:
-    countries: [SG, TW]
-    source: ashby
-    board: replace-with-your-board-name
-  Example Systems:
-    countries: [CA, GB, FR, REMOTE]
-    source: ashby
-    board: replace-with-your-board-name
+    board: openai
+  PayPay:
+    countries: [JP]
+    source: greenhouse
+    board: paypay

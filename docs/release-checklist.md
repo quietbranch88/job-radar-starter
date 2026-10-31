@@ -35,11 +35,7 @@ Keep the evidence with the release record. A green local checklist proves the
 tested commit only; it does not prove external provider availability or a live
 deployment.
 
-For source health, Sheets outbox or review-receipt changes, also record exact
-dirty-file hashes, retry/readback/conflict and version-mismatch tests, optional
-state export/deletion/active-writer checks, and independent review. Real source
-checks must name the configured boards and UTC fetch times. A synthetic Google
-test must name its isolated target and assert final row count/content after a
-controlled uncertain acknowledgement. State any connector/HTTP substitution and
-unverified credential path; never use a job master as a test target. Keep private
-verification records and provider payloads out of published artifacts.
+For source-health changes, also record exact dirty-file hashes and independent
+review. Real source checks must name the configured boards and UTC fetch times.
+Keep private verification records and provider payloads out of published
+artifacts.

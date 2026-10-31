@@ -9,10 +9,10 @@ Run commands from the repository root. Preserve local privacy and source-policy 
 
 ## Workflow
 
-1. Copy `config.example/profile.yaml` to gitignored `user-data/profile.yaml` if no local profile exists. Never replace it with a real profile in a tracked path.
-2. Run `job-radar --json doctor` and resolve reported catalog, profile, output-path, or AI-executable failures.
-3. Inspect configured public sources with `job-radar --json catalog list` when changing country or company coverage.
-4. Run `job-radar --json run` to scan official APIs, apply local rules, write `scans/latest.json`, and rebuild `dashboard/public/index.html`.
+1. Run `job-radar --json init` when `user-data/profile.yaml` or `user-data/sources.yaml` is missing. It copies the example profile and the shared public company catalog, and does not overwrite existing files. Keep personal preference edits in gitignored `user-data/`. Do not commit them back into `config.example/` or `catalog/sources.yaml`.
+2. Run `job-radar --json doctor --catalog user-data/sources.yaml` and resolve reported catalog, placeholder-board, profile, output-path, or AI-executable failures. Placeholder boards use the `replace-with-your-board` prefix and must be replaced with a public Greenhouse, Lever, or Ashby board name, or removed, before a live scan.
+3. Inspect configured public sources with `job-radar --json catalog list --catalog user-data/sources.yaml` when changing country or company coverage.
+4. Run `job-radar --json run --catalog user-data/sources.yaml` to scan official APIs, apply local rules, write `scans/latest.json`, and rebuild `dashboard/public/index.html`.
 5. Report scanned and published counts plus both output paths. Open the generated dashboard when UI verification is part of the request.
 
 Use `job-radar --json scan` and `job-radar --json score` separately when diagnosing a pipeline stage. Keep `--ai-command <executable> [args...]` last. Only use an AI command explicitly supplied or approved by the user.
