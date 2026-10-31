@@ -62,13 +62,13 @@ Both stay on your machine. Do not commit them.
 
 ### 3. Name the companies you want
 
-Open `user-data/sources.yaml`. Every company starts with a board value such as `replace-with-your-board-token`. A scan needs the board name from that company's public careers URL:
+Open `user-data/sources.yaml`. It already names public boards for Airwallex, Cohere, Faire, GitLab, Monzo, OpenAI, and PayPay. Delete any company you do not want. Keep the `countries` and `sources` sections.
+
+To add a company, set `board` to the name in its public careers URL:
 
 - Greenhouse: `https://boards.greenhouse.io/BOARD` → `BOARD`
 - Lever: `https://jobs.lever.co/BOARD` → `BOARD`
 - Ashby: `https://jobs.ashbyhq.com/BOARD` → `BOARD`
-
-Delete companies you do not want. Keep the `countries` and `sources` sections.
 
 Open `user-data/profile.yaml` and change countries, roles, and skills. `minimum_score` hides lower matches from the dashboard. The scan still saves them.
 
