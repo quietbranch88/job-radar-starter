@@ -143,9 +143,6 @@ class WindowsJob:
         ):
             _raise_last_error("AssignProcessToJobObject")
 
-    def assign_current_process(self) -> None:
-        self.assign_handle(int(_kernel32.GetCurrentProcess()))
-
     def active_processes(self) -> int:
         if not self._handle:
             return 0

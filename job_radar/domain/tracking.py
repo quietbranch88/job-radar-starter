@@ -40,7 +40,8 @@ def dashboard_marker(status: str) -> str:
     if normalized in {"rejected", "withdrawn"}:
         return "skip"
     raise ValueError(f"unsupported status: {status}")
-_TERMINAL_STATUSES = {"accepted", "rejected", "withdrawn"}
+
+
 _ALLOWED_TRANSITIONS = {
     "interested": {"interested", "applied", "rejected", "withdrawn"},
     "applied": {"applied", "interview", "rejected", "withdrawn"},

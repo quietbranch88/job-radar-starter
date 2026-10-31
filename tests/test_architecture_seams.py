@@ -93,6 +93,18 @@ def test_inline_scan_uses_the_same_result_contract_as_a_resilient_scan(tmp_path:
     assert (tmp_path / "latest.json").exists()
 
 
+def test_removed_helpers_stay_out_of_the_live_modules():
+    import job_radar.ai_review as ai_review
+    import job_radar.dashboard as dashboard
+    import job_radar.domain.tracking as tracking
+    import job_radar.windows_job as windows_job
+
+    assert not hasattr(dashboard, "_job_card")
+    assert not hasattr(tracking, "_TERMINAL_STATUSES")
+    assert not hasattr(ai_review, "TimedReviewProvider")
+    assert not hasattr(windows_job.WindowsJob, "assign_current_process")
+
+
 def test_dashboard_leaves_sync_off_unless_asked(tmp_path: Path):
     job = Job(
         source="greenhouse",

@@ -19,16 +19,6 @@ class ReviewProvider(Protocol):
     def review(self, mode: str, request: dict[str, Any]) -> dict[str, Any]: ...
 
 
-class TimedReviewProvider(Protocol):
-    def review_with_timeout(
-        self,
-        mode: str,
-        request: dict[str, Any],
-        *,
-        timeout_seconds: float,
-    ) -> dict[str, Any]: ...
-
-
 class ReviewRepository(Protocol):
     def read(self, kind: str) -> dict[str, Any]: ...
 
