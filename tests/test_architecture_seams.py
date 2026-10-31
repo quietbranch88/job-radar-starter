@@ -191,5 +191,13 @@ def test_daily_run_and_job_documents_live_outside_the_cli():
     assert "record_confirmed_application(" not in source
     import job_radar.public_workflow as workflow
     import job_radar.review_supervisor as supervisor
+    import job_radar.scan_workers as scan_workers
+    import job_radar.source_orchestration as orchestration
     assert workflow.run_review_runner_bounded is supervisor.run_review_runner_bounded
     assert not hasattr(workflow, "_kill_worker_tree")
+    assert orchestration._start_worker is scan_workers._start_worker
+    assert orchestration._close_worker is scan_workers._close_worker
+    assert orchestration._fetch_scoped_jobs is scan_workers._fetch_scoped_jobs
+    assert scan_workers._source_worker.__module__ == "job_radar.scan_workers"
+    assert not hasattr(orchestration, "_source_worker")
+    assert not hasattr(orchestration, "_FETCHERS")
