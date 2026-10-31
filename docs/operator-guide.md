@@ -31,8 +31,9 @@ deterministic local window is required.
 Pure scoring rules live in `job_radar.application` and depend only on the
 normalized job model and user configuration. `job_radar.pipeline` composes the
 daily run around them: source orchestration selects Greenhouse, Lever, or
-Ashby through the adapters; `official_http` fetches their JSON; `documents`
-reads the jobs envelopes; `legacy_command_adapter` owns the bounded external
+Ashby through the adapters; `scan_workers` fetches one official board in a
+child process and stops that process at the deadline; `official_http` fetches
+their JSON; `documents` reads the jobs envelopes; `legacy_command_adapter` owns the bounded external
 scoring command; `job_output` owns JSON file replacement; and Dashboard
 rendering remains a UI adapter. The CLI parses arguments and prints reports. `review_supervisor` runs the
 configured review in a child process and stops that process at the deadline.
