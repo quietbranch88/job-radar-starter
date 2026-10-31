@@ -29,12 +29,13 @@ deterministic local window is required.
 ### Runtime dependency boundary
 
 Pure scoring rules live in `job_radar.application` and depend only on the
-normalized job model and user configuration. The CLI composes concrete
-boundaries around them: source orchestration selects Greenhouse, Lever, or
-Ashby through the adapters; `legacy_command_adapter` owns the bounded external
-scoring command;
-`job_output` owns JSON file replacement; and Dashboard rendering remains a UI
-adapter. `public_workflow` receives scoring and repository behavior through
+normalized job model and user configuration. `job_radar.pipeline` composes the
+daily run around them: source orchestration selects Greenhouse, Lever, or
+Ashby through the adapters; `official_http` fetches their JSON; `documents`
+reads the jobs envelopes; `legacy_command_adapter` owns the bounded external
+scoring command; `job_output` owns JSON file replacement; and Dashboard
+rendering remains a UI adapter. The CLI parses arguments and prints reports.
+`public_workflow` receives scoring and repository behavior through
 callable or protocol ports instead of importing those concrete adapters.
 
 Local rules run first. A hard exclusion cannot be reversed by a model. Eligible

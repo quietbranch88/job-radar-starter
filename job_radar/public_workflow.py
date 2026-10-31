@@ -460,3 +460,86 @@ def execute_public_workflow(
             "published": len(published),
         },
     }
+
+
+def empty_tracking() -> dict[str, Any]:
+    return {
+        "statuses": {},
+        "metrics": {
+            "contract_version": 1,
+            "total": 0,
+            "funnel": {},
+            "rejection_stages": {},
+            "slices": {
+                "resume_version": {},
+                "channel": {},
+                "country": {},
+            },
+        },
+        "due_actions": [],
+    }
+
+
+def view_model_from_document(kind: str, raw: Any) -> dict[str, Any]:
+    if kind == "lifecycle":
+        return {
+            "contract_version": 1,
+            "scan": {
+                "state": "complete",
+                "mode": "atomic",
+                "incomplete": False,
+                "observed_on": "",
+                "failures": [],
+            },
+            "jobs": raw["jobs"],
+            "review": {"rejected": [], "sampled_rejected_ids": []},
+            "tracking": {**empty_tracking(), "statuses": raw["statuses"]},
+        }
+    if kind == "scan":
+        observed_on = raw.get("observed_on", "")
+        lifecycle = merge_scan_state(
+            prior_state={"contract_version": 1, "jobs": [], "statuses": {}},
+            scan_result=raw,
+            observed_on=observation_as_of(
+                observed_on,
+                raw["jobs"],
+                latest_observed_on=raw.get("latest_observed_on"),
+            ),
+            aliases={
+                "contract_version": 1,
+                "company_aliases": {},
+                "title_aliases": {},
+            },
+            statuses={},
+        ) if observed_on else {
+            "jobs": [
+                {
+                    **item,
+                    "stable_id": stable_job_id(
+                        source=item["source"],
+                        external_id=item["external_id"],
+                        company=item["company"],
+                        title=item["title"],
+                    ),
+                    "last_seen": "",
+                    "freshness": "active",
+                    "legacy_status_keys": [],
+                }
+                for item in raw["jobs"]
+            ],
+            "statuses": {},
+        }
+        return {
+            "contract_version": 1,
+            "scan": {
+                "state": "partial" if raw["incomplete"] else "complete",
+                "mode": raw["mode"],
+                "incomplete": raw["incomplete"],
+                "observed_on": observed_on,
+                "failures": raw["failures"],
+            },
+            "jobs": lifecycle["jobs"],
+            "review": {"rejected": [], "sampled_rejected_ids": []},
+            "tracking": {**empty_tracking(), "statuses": lifecycle["statuses"]},
+        }
+    raise ValueError("legacy input does not have a versioned Dashboard view model")

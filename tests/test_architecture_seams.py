@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 from job_radar.adapters import Job
@@ -162,3 +163,25 @@ def test_dashboard_leaves_sync_off_unless_asked(tmp_path: Path):
         install_sync=True,
     )
     assert 'data-dashboard-optional-sync="1"' in (tmp_path / "sync.html").read_text(encoding="utf-8")
+
+
+def test_daily_run_and_job_documents_live_outside_the_cli():
+    import job_radar.cli as cli
+    import job_radar.documents as documents
+    import job_radar.pipeline as pipeline
+    from job_radar.public_workflow import view_model_from_document
+
+    assert callable(documents.load_jobs)
+    assert callable(documents.load_jobs_document)
+    assert callable(view_model_from_document)
+    assert callable(pipeline.run_daily)
+    assert callable(pipeline.score_jobs_file)
+    assert callable(pipeline.build_dashboard)
+    assert not hasattr(cli, "_load_jobs")
+    assert not hasattr(cli, "_view_model_from_document")
+    assert not hasattr(cli, "_load_jobs_document")
+    source = inspect.getsource(cli.main)
+    assert "run_daily(" in source
+    assert "execute_public_workflow(" not in source
+    assert "score_jobs_file(" in source
+    assert "build_dashboard(" in source

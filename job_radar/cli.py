@@ -7,32 +7,24 @@ import shlex
 import shutil
 import subprocess
 import sys
-from dataclasses import asdict, fields
-from datetime import date, datetime, timezone
+from dataclasses import asdict
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, TextIO
-from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
 
-from job_radar.application import SCORING_FIELDS, score_jobs
 from job_radar.catalog import Catalog, load_catalog
 from job_radar.config import load_user_config
-from job_radar.domain.jobs import Job
-from job_radar.dashboard import render_dashboard, render_dashboard_view_model
 from job_radar.data.tracking_store import LocalTrackingStore
-from job_radar.lifecycle_merge import merge_scan_state, observation_as_of
-from job_radar.job_output import write_jobs_json
-from job_radar.legacy_scoring import LegacyCommandScorer, score_jobs_with_command
-from job_radar.public_workflow import execute_public_workflow, project_application_tracking, run_review_runner_bounded
+from job_radar.documents import job_items
+from job_radar.official_http import http_get_json
+from job_radar.pipeline import RunReceiptSlot, build_dashboard, run_daily, score_jobs_file
+from job_radar.public_workflow import run_review_runner_bounded
 from job_radar.review_provider import ConfiguredExternalReviewRunner
-from job_radar.domain.tracking import stable_job_id
 from job_radar.tracking_commands import record_confirmed_application
 from job_radar.source_orchestration import (
     AtomicSourceScanFailed,
     scan_catalog_resilient,
 )
-from job_radar.local_state import writer_guard
-from job_radar.run_receipt import RunReceipt
 
 
 DEFAULT_CATALOG = Path("catalog/sources.yaml")
@@ -45,7 +37,6 @@ DEFAULT_DASHBOARD = Path("dashboard/public/index.html")
 DEFAULT_USER_DATA = Path("user-data")
 DEFAULT_ALIASES = Path("user-data/aliases.json")
 PLACEHOLDER_BOARD_PREFIX = "replace-with-your-board"
-MAX_RESPONSE_BYTES = 50 * 1024 * 1024
 
 
 def _add_catalog_argument(parser: argparse.ArgumentParser) -> None:
@@ -212,171 +203,6 @@ def _parser() -> argparse.ArgumentParser:
     recording.add_argument("--confirmed-at", required=True, help="ISO datetime with timezone when the submission was confirmed")
     recording.add_argument("--confirm-submitted", action="store_true")
     return parser
-
-
-def http_get_json(url: str, *, timeout: int = 30) -> Any:
-    parsed = urlsplit(url)
-    if parsed.scheme != "https" or not parsed.hostname:
-        raise ValueError("official source URL must use HTTPS")
-    request = Request(
-        url,
-        headers={
-            "Accept": "application/json",
-            "User-Agent": "job-radar-starter/0.1 (local single-user client)",
-        },
-    )
-    with urlopen(request, timeout=timeout) as response:
-        raw = response.read(MAX_RESPONSE_BYTES + 1)
-    if len(raw) > MAX_RESPONSE_BYTES:
-        raise ValueError("official source response exceeded 50 MiB")
-    return json.loads(raw.decode("utf-8"))
-
-
-def _job_from_dict(item: Any) -> Job:
-    if not isinstance(item, dict):
-        raise ValueError("each jobs JSON entry must be an object")
-    allowed = {field.name for field in fields(Job)}
-    normalized = {key: value for key, value in item.items() if key in allowed}
-    for field in ("tracks", "skills", "jd_evidence"):
-        value = normalized.get(field, ())
-        if not isinstance(value, (list, tuple)) or not all(
-            isinstance(entry, str) for entry in value
-        ):
-            raise ValueError(f"job {field} must be a list of strings")
-        normalized[field] = tuple(value)
-    return Job(**normalized)
-
-
-def _load_jobs(path: Path) -> list[Job]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    items = _job_items(raw)
-    return [_job_from_dict(item) for item in items]
-
-
-def _job_items(raw: Any) -> list[dict[str, Any]]:
-    if isinstance(raw, list):
-        items = raw
-    elif (
-        isinstance(raw, dict)
-        and raw.get("contract_version") == 1
-        and isinstance(raw.get("jobs"), list)
-    ):
-        items = raw["jobs"]
-    else:
-        raise ValueError(
-            "jobs JSON must be a legacy list or versioned scan/lifecycle envelope"
-        )
-    if not all(isinstance(item, dict) for item in items):
-        raise ValueError("jobs JSON entries must be objects")
-    return items
-
-
-def _load_jobs_document(path: Path) -> tuple[str, Any, list[Job]]:
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    jobs = _load_jobs(path)
-    if isinstance(raw, list):
-        return "legacy", raw, jobs
-    if set(raw) - {"observed_on", "latest_observed_on"} == {
-        "contract_version",
-        "mode",
-        "incomplete",
-        "jobs",
-        "failures",
-    }:
-        if "latest_observed_on" in raw:
-            if not isinstance(raw["latest_observed_on"], str):
-                raise ValueError("latest_observed_on must be an ISO date")
-            observation_as_of(raw.get("observed_on"), raw["jobs"],
-                              latest_observed_on=raw["latest_observed_on"])
-        return "scan", raw, jobs
-    if set(raw) == {"contract_version", "jobs", "statuses"}:
-        return "lifecycle", raw, jobs
-    raise ValueError("jobs JSON has an unsupported versioned envelope")
-
-
-def _atomic_write_json(path: Path, payload: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
-
-
-def _empty_tracking() -> dict[str, Any]:
-    return {
-        "statuses": {},
-        "metrics": {
-            "contract_version": 1,
-            "total": 0,
-            "funnel": {},
-            "rejection_stages": {},
-            "slices": {
-                "resume_version": {},
-                "channel": {},
-                "country": {},
-            },
-        },
-        "due_actions": [],
-    }
-
-
-def _view_model_from_document(kind: str, raw: Any) -> dict[str, Any]:
-    if kind == "lifecycle":
-        return {
-            "contract_version": 1,
-            "scan": {
-                "state": "complete",
-                "mode": "atomic",
-                "incomplete": False,
-                "observed_on": "",
-                "failures": [],
-            },
-            "jobs": raw["jobs"],
-            "review": {"rejected": [], "sampled_rejected_ids": []},
-            "tracking": {**_empty_tracking(), "statuses": raw["statuses"]},
-        }
-    if kind == "scan":
-        observed_on = raw.get("observed_on", "")
-        lifecycle = merge_scan_state(
-            prior_state={"contract_version": 1, "jobs": [], "statuses": {}},
-            scan_result=raw,
-            observed_on=observation_as_of(observed_on, raw["jobs"],
-                                          latest_observed_on=raw.get("latest_observed_on")),
-            aliases={
-                "contract_version": 1,
-                "company_aliases": {},
-                "title_aliases": {},
-            },
-            statuses={},
-        ) if observed_on else {
-            "jobs": [
-                {
-                    **item,
-                    "stable_id": stable_job_id(source=item["source"], external_id=item["external_id"], company=item["company"], title=item["title"]),
-                    "last_seen": "",
-                    "freshness": "active",
-                    "legacy_status_keys": [],
-                }
-                for item in raw["jobs"]
-            ],
-            "statuses": {},
-        }
-        return {
-            "contract_version": 1,
-            "scan": {
-                "state": "partial" if raw["incomplete"] else "complete",
-                "mode": raw["mode"],
-                "incomplete": raw["incomplete"],
-                "observed_on": observed_on,
-                "failures": raw["failures"],
-            },
-            "jobs": lifecycle["jobs"],
-            "review": {"rejected": [], "sampled_rejected_ids": []},
-            "tracking": {**_empty_tracking(), "statuses": lifecycle["statuses"]},
-        }
-    raise ValueError("legacy input does not have a versioned Dashboard view model")
 
 
 def _catalog_report(catalog: Catalog) -> dict[str, Any]:
@@ -731,7 +557,7 @@ def main(
         def scan_runner(catalog, transport, **kwargs):
             inline = kwargs.pop("inline", False)
             return scan_catalog_resilient(catalog, transport, inline=inline, **kwargs)
-    run_receipt: RunReceipt | None = None
+    receipt_slot = RunReceiptSlot()
     try:
         if args.command == "init":
             report = _init_local_files(args)
@@ -790,43 +616,13 @@ def main(
             return 0
 
         if args.command == "score":
-            kind, raw, jobs = _load_jobs_document(args.jobs)
-            config = load_user_config(args.profile)
-            if args.ai_command:
-                scored = score_jobs_with_command(
-                    jobs,
-                    config,
-                    args.ai_command,
-                    runner=command_runner,
-                )
-            else:
-                scored = score_jobs(jobs, config)
-            if kind == "scan":
-                payload = dict(raw)
-                payload["jobs"] = [asdict(job) for job in scored]
-                _atomic_write_json(args.output, payload)
-            elif kind == "lifecycle":
-                by_key = {
-                    (job.source, job.external_id): asdict(job) for job in scored
-                }
-                payload = dict(raw)
-                payload["jobs"] = [
-                    {
-                        **item,
-                        **by_key[(str(item["source"]), str(item["external_id"]))],
-                    }
-                    for item in raw["jobs"]
-                ]
-                _atomic_write_json(args.output, payload)
-            else:
-                write_jobs_json(scored, args.output)
-            report = {
-                "ok": True,
-                "operation": "score",
-                "counts": {"scored": len(scored)},
-                "output": str(args.output.resolve()),
-                "mode": "ai_command" if args.ai_command else "local_rules",
-            }
+            report = score_jobs_file(
+                jobs=args.jobs,
+                profile=args.profile,
+                output=args.output,
+                ai_command=args.ai_command,
+                command_runner=command_runner,
+            )
             _emit(report, as_json=args.json, stdout=stdout)
             return 0
 
@@ -848,73 +644,35 @@ def main(
                 reserved.extend((checkpoint_path, checkpoint_guard))
             if args.run_manifest is not None and args.run_manifest.resolve() in {path.resolve() for path in reserved}:
                 raise ValueError('run receipt must be separate from inputs and outputs')
-            with writer_guard(args.jobs_output.resolve().with_name(args.jobs_output.name + '.run.guard')):
-                run_receipt = RunReceipt(args.jobs_output.resolve(), path=args.run_manifest)
-                try:
-                    run_receipt.stage('scan', 'running')
-                    checkpoint_options = {}
-                    if args.checkpoint is not None or args.resume:
-                        checkpoint_options = dict(checkpoint=args.checkpoint, resume=args.resume,
-                                                  observed_on=args.observed_on, on_progress=run_receipt.scan_progress)
-                    if args.health_output is not None:
-                        checkpoint_options['health_output'] = args.health_output
-                        run_receipt.document['source_health_path'] = str(args.health_output.resolve())
-                    scan_options = dict(
-                        mode=args.mode,
-                        per_source_timeout=args.source_timeout,
-                        output=args.jobs_output,
-                        max_concurrency=args.max_source_concurrency,
-                        **checkpoint_options,
-                    )
-                    if (
-                        injected_get_json
-                        and default_scan_runner
-                        and args.checkpoint is None
-                        and not args.resume
-                        and args.health_output is None
-                    ):
-                        scan_options["inline"] = True
-                    scan_result = scan_runner(
-                        load_catalog(args.catalog), get_json, **scan_options,
-                    )
-                    run_receipt.stage('scan', 'partial' if scan_result['incomplete'] else 'complete')
-                    aliases = json.loads(args.aliases.read_text(encoding='utf-8')) if args.aliases.exists() else {
-                        'contract_version': 1, 'company_aliases': {}, 'title_aliases': {},
-                    }
-                    observation = scan_result.get('observed_on', args.observed_on) if args.checkpoint is not None else args.observed_on
-                    run_receipt.document['observed_on'] = observation
-                    run_receipt.stage('workflow', 'running')
-                    workflow = execute_public_workflow(
-                        scan_result=scan_result, config=load_user_config(args.profile),
-                        repository=LocalTrackingStore(args.user_data.resolve()), observed_on=observation,
-                        aliases=aliases,
-                        ai_scorer=LegacyCommandScorer(args.ai_command, runner=command_runner) if args.ai_command else None,
-                        review_runner=review_runner or (ConfiguredExternalReviewRunner(args.provider_command) if args.provider_command else None),
-                        per_call_timeout_seconds=args.per_call_timeout,
-                        total_deadline_seconds=args.total_review_deadline, max_fast_calls=args.max_fast_calls,
-                        on_stage=run_receipt.stage,
-                    )
-                    _atomic_write_json(args.jobs_output, workflow['scan'])
-                    run_receipt.stage('workflow', 'complete')
-                    run_receipt.stage('build', 'running')
-                    render_dashboard_view_model(
-                        workflow['view_model'], args.dashboard_output, install_sync=args.install_sync,
-                    )
-                    run_receipt.stage('build', 'complete')
-                    run_receipt.finish()
-                except BaseException as error:
-                    run_receipt.finish(error)
-                    raise
-                report = {
-                    'ok': True, 'contract_version': 1, 'operation': 'run',
-                    'workflow': ['scan', 'score', 'review', 'lifecycle', 'tracking', 'dashboard'],
-                    'counts': workflow['counts'], 'jobs_output': str(args.jobs_output.resolve()),
-                    'dashboard_output': str(args.dashboard_output.resolve()),
-                    'mode': 'ai_command' if args.ai_command else 'local_rules', 'review': workflow['review'],
-                    'run_manifest': str(run_receipt.path.resolve()), 'stages': run_receipt.document['stages'],
-                }
-                if args.health_output is not None:
-                    report['source_health_output'] = str(args.health_output.resolve())
+            report = run_daily(
+                catalog=args.catalog,
+                profile=args.profile,
+                aliases=args.aliases,
+                user_data=args.user_data,
+                jobs_output=args.jobs_output,
+                dashboard_output=args.dashboard_output,
+                run_manifest=args.run_manifest,
+                health_output=args.health_output,
+                checkpoint=args.checkpoint,
+                resume=args.resume,
+                observed_on=args.observed_on,
+                mode=args.mode,
+                source_timeout=args.source_timeout,
+                max_source_concurrency=args.max_source_concurrency,
+                ai_command=args.ai_command,
+                provider_command=args.provider_command,
+                per_call_timeout=args.per_call_timeout,
+                total_review_deadline=args.total_review_deadline,
+                max_fast_calls=args.max_fast_calls,
+                install_sync=args.install_sync,
+                get_json=get_json,
+                command_runner=command_runner,
+                scan_runner=scan_runner,
+                review_runner=review_runner,
+                injected_get_json=injected_get_json,
+                default_scan_runner=default_scan_runner,
+                receipt_slot=receipt_slot,
+            )
             _emit(report, as_json=args.json, stdout=stdout)
             if not args.json:
                 print('stages: ' + ', '.join(f'{name}={state}' for name, state in report['stages'].items()), file=stdout)
@@ -955,43 +713,19 @@ def main(
 
         if args.command == "build-dashboard":
             _validate_output_boundary(args.output, inputs=(args.jobs, args.profile), user_data=args.user_data)
-            kind, raw, jobs = _load_jobs_document(args.jobs)
-            if kind == "legacy" and args.user_data is None and args.profile is None:
-                render_dashboard(jobs, args.output)
-            else:
-                model = _view_model_from_document(
-                    "scan" if kind == "legacy" else kind,
-                    {"contract_version": 1, "mode": "atomic", "incomplete": False, "jobs": raw, "failures": []}
-                    if kind == "legacy" else raw,
-                )
-                if args.user_data is not None:
-                    model["tracking"] = project_application_tracking(
-                        LocalTrackingStore(args.user_data.resolve()),
-                        as_of=datetime.now(timezone.utc).isoformat(),
-                    )
-                if args.profile is not None:
-                    config = load_user_config(args.profile)
-                    rescored = {(job.source, job.external_id): asdict(job) for job in score_jobs(jobs, config)}
-                    model['jobs'] = [dict(item, **{field: rescored[(str(item['source']), str(item['external_id']))][field]
-                                                  for field in SCORING_FIELDS})
-                                     for item in model['jobs']
-                                     if (rescored[(str(item['source']), str(item['external_id']))]['score'] or 0) >= config.matching.minimum_score]
-                render_dashboard_view_model(model, args.output, install_sync=args.install_sync)
-            _emit(
-                {
-                    "ok": True,
-                    "operation": "build-dashboard",
-                    "counts": {"jobs": len(jobs)},
-                    "output": str(args.output.resolve()),
-                },
-                as_json=args.json,
-                stdout=stdout,
+            report = build_dashboard(
+                jobs=args.jobs,
+                output=args.output,
+                user_data=args.user_data,
+                profile=args.profile,
+                install_sync=args.install_sync,
             )
+            _emit(report, as_json=args.json, stdout=stdout)
             return 0
 
         if args.command == "review":
             raw = json.loads(args.jobs.read_text(encoding="utf-8"))
-            items = _job_items(raw)
+            items = job_items(raw)
             store = LocalTrackingStore(args.user_data.resolve())
             store.initialize()
             active_review_runner = (
@@ -1110,8 +844,8 @@ def main(
             },
             **error.result,
         }
-        if run_receipt is not None:
-            report.update(run_manifest=str(run_receipt.path.resolve()), stages=run_receipt.document['stages'])
+        if receipt_slot.receipt is not None:
+            report.update(run_manifest=str(receipt_slot.receipt.path.resolve()), stages=receipt_slot.receipt.document['stages'])
         if args.json:
             print(json.dumps(report, ensure_ascii=False, sort_keys=True), file=stdout)
         else:
@@ -1119,8 +853,8 @@ def main(
         return error.exit_code
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as error:
         report = {"ok": False, "error": {"type": type(error).__name__, "message": str(error)}}
-        if run_receipt is not None:
-            report.update(run_manifest=str(run_receipt.path.resolve()), stages=run_receipt.document['stages'])
+        if receipt_slot.receipt is not None:
+            report.update(run_manifest=str(receipt_slot.receipt.path.resolve()), stages=receipt_slot.receipt.document['stages'])
         if args.json:
             print(json.dumps(report, ensure_ascii=False, sort_keys=True), file=stdout)
         else:
