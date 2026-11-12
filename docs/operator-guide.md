@@ -13,6 +13,13 @@ source fails. Best-effort mode writes partial healthy-source results with
 `incomplete: true` and structured failures. Treat incomplete scans as partial,
 not as proof that missing companies have no jobs.
 
+An official request retries HTTP 429 at most twice. The wait is the server's
+`Retry-After` when that delay is from 0 through 5 seconds. A missing header
+waits 1 second. A longer delay is not retried, so the scan does not sleep past
+the per-source budget or call the board again early. That company is then
+reported as rate limited. Use `--mode best-effort` when one failed board
+should not hold back the boards that succeeded. The default remains `atomic`.
+
 ## 2. Normalize, score, and review
 
 Stable IDs and aliases prevent the same application from splitting when a
@@ -40,6 +47,13 @@ configured review in a child process and stops that process at the deadline.
 `public_workflow` projects scores, lifecycle, and the dashboard view, and
 receives scoring and repository behavior through callable or protocol ports
 instead of importing those concrete adapters.
+
+Local rules match preferences as whole tokens. A skill such as `Go` does not
+match inside `algorithm` or `Golang`. `C++` and `C#` stay intact, and a
+hyphenated term such as `ai-product` matches the consecutive words. The summary
+names the matched role, track, skill, and must-have terms. Optional
+`matching.weights` in the local profile replaces the default point values.
+Those weights stay on this machine and are not included in a review request.
 
 Local rules run first. A hard exclusion cannot be reversed by a model. Eligible
 jobs can receive fast review from the one configured provider. AI output is advisory.
@@ -101,7 +115,11 @@ records rather than entered separately.
 
 The Dashboard's Applied button records a browser marker, not evidence that an
 application was submitted. It does not create an application or update funnel
-metrics. After verifying the real submission, export Dashboard state and run:
+metrics. Marking Applied opens a confirmation form on that card and on Saved
+matches. The form fills the job id and, after the verification box is checked,
+copies a `tracking record-application` command. It does not write tracking
+state. Export Dashboard state, move `job-radar-state.json` into `user-data/`,
+and run:
 
 ```powershell
 job-radar --json tracking record-application --from-dashboard user-data\job-radar-state.json --job-id "<stable-job-id-from-export>" --applied-at unknown --resume-version "backend-v2" --channel "official-site" --confirmation-evidence "Submission receipt checked locally" --confirmed-at "2026-10-23T00:05:00Z" --confirm-submitted

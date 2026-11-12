@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
+import re
 from typing import Any
 
 from job_radar.config import UserConfig
@@ -43,8 +44,24 @@ def _terms(job: Job) -> str:
     ).casefold()
 
 
+# A token is a word, with C++ and C# kept intact. Hyphens, slashes, and dots are
+# boundaries, so "ai-product" is the consecutive tokens "ai" and "product".
+_TOKEN = re.compile(r"[a-z0-9]+(?:\+\+|#)?", re.IGNORECASE)
+
+
+def _tokens(text: str) -> tuple[str, ...]:
+    return tuple(match.group(0).casefold() for match in _TOKEN.finditer(text))
+
+
 def _contains(text: str, term: str) -> bool:
-    return bool(term.strip()) and term.casefold() in text
+    needle = _tokens(term)
+    if not needle:
+        return False
+    haystack = _tokens(text)
+    width = len(needle)
+    if width > len(haystack):
+        return False
+    return any(haystack[index:index + width] == needle for index in range(len(haystack) - width + 1))
 
 
 def score_jobs(jobs: Sequence[Job], config: UserConfig) -> list[Job]:
@@ -85,61 +102,68 @@ def score_jobs(jobs: Sequence[Job], config: UserConfig) -> list[Job]:
             )
             continue
 
-        score = 30
+        weights = config.matching.weights
+        score = weights.base
         matches: list[str] = []
         risks: list[str] = []
 
         preferred_countries = {
             country.casefold() for country in config.preferences.countries
         }
-        country_match = bool(job.country) and job.country.casefold() in preferred_countries
-        if not country_match:
-            country_match = any(
-                location_matches_country(job.location, country)
-                for country in config.preferences.countries
+        matched_country = ""
+        if job.country and job.country.casefold() in preferred_countries:
+            matched_country = job.country
+        else:
+            matched_country = next(
+                (
+                    country
+                    for country in config.preferences.countries
+                    if location_matches_country(job.location, country)
+                ),
+                "",
             )
-        if country_match:
-            score += 10
-            matches.append("country")
+        if matched_country:
+            score += weights.country
+            matches.append(f"country: {matched_country}")
 
         role_matches = [role for role in config.preferences.roles if _contains(text, role)]
         if role_matches:
-            score += 15
-            matches.append("role")
+            score += weights.role
+            matches.append("role: " + ", ".join(role_matches))
 
         track_matches = [track for track in config.preferences.tracks if _contains(text, track)]
         if track_matches:
-            score += 10
-            matches.append("track")
+            score += weights.track
+            matches.append("track: " + ", ".join(track_matches))
 
         skill_matches = [skill for skill in config.profile.skills if _contains(text, skill)]
         if skill_matches:
-            score += min(24, 8 * len(skill_matches))
-            matches.append("skills")
+            score += min(weights.skill_cap, weights.skill * len(skill_matches))
+            matches.append("skills: " + ", ".join(skill_matches))
 
         if company in preferred:
-            score += 10
+            score += weights.preferred_company
             matches.append("preferred company")
 
         missing_must_have = [
             term for term in config.matching.must_have if not _contains(text, term)
         ]
         if missing_must_have:
-            score -= 20
+            score -= weights.missing_must_have
             risks.append("missing must-have: " + ", ".join(missing_must_have))
         elif config.matching.must_have:
-            score += 5
-            matches.append("must-have")
+            score += weights.must_have
+            matches.append("must-have: " + ", ".join(config.matching.must_have))
 
         if config.preferences.visa_required:
             if job.visa_supported is True:
-                score += 5
+                score += weights.visa_listed
                 matches.append("visa")
             elif job.visa_supported is False:
-                score -= 25
+                score -= weights.visa_absent
                 risks.append("visa support not indicated")
             else:
-                score -= 8
+                score -= weights.visa_unknown
                 risks.append("verify visa support")
 
         normalized_score = max(0, min(100, score))

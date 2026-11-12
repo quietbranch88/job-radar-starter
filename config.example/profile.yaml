@@ -35,3 +35,18 @@ matching:
   exclude_keywords:
     - unpaid
     - commission-only
+  # Optional local point values. Omit the block to keep these defaults.
+  # Weights stay in this file and are not sent to a review provider.
+  weights:
+    base: 30
+    country: 10
+    role: 15
+    track: 10
+    skill: 8
+    skill_cap: 24
+    preferred_company: 10
+    must_have: 5
+    missing_must_have: 20
+    visa_listed: 5
+    visa_absent: 25
+    visa_unknown: 8

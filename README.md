@@ -45,7 +45,7 @@ pip install -e ".[dev]"
 job-radar build-dashboard --jobs examples\jobs.example.json --output dashboard\public\index.html
 ```
 
-Open `dashboard/public/index.html`. The roles on that page are examples. The "New here?" note on the page explains the buttons. Interested, Applied, and Hide stay in the browser. Applied does not submit an application.
+Open `dashboard/public/index.html`. The roles on that page are examples. The "New here?" note on the page explains the buttons. Interested, Applied, and Hide stay in the browser. Applied does not submit an application. After you verify the official submission, the Applied card can copy the local confirmation command.
 
 ### 2. Create your local files
 
