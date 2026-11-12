@@ -113,6 +113,47 @@ test('large scan renders a bounded window and loads more without losing filters'
   await expect(page.locator('#visibleCount')).toHaveText('1');
 });
 
+test('an Applied card copies a confirmation command only after verification', async ({ page }) => {
+  const errors = await openDashboard(page, { width: 1280, height: 900 });
+  const card = page.locator('[data-key="job_active"]');
+  await expect(card.getByTestId('confirm-application')).toHaveCount(0);
+  await card.getByRole('button', { name: '✓ Applied', exact: true }).click();
+  const form = card.getByTestId('confirm-application');
+  await expect(form).toBeVisible();
+  await form.getByRole('button', { name: 'Copy confirmation command' }).click();
+  await expect(form.locator('.confirm-error')).toContainText('verify the submission');
+  await expect(form.locator('textarea')).toBeHidden();
+
+  await form.getByLabel('Resume version').fill('backend-v2');
+  await form.getByLabel('Channel').fill('official-site');
+  await form.getByLabel('Confirmation note').fill('See receipt 1/2 locally');
+  await form.getByLabel('Confirmed at').fill('2026-10-23T00:05:00+08:00');
+  await form.getByRole('checkbox', { name: 'I verified this submission on the official site' }).check();
+  await form.getByRole('button', { name: 'Copy confirmation command' }).click();
+  await expect(form.locator('textarea')).toHaveValue(/--job-id "job_active"/);
+  await expect(form.locator('textarea')).toHaveValue(/--applied-at "unknown"/);
+  await expect(form.locator('textarea')).toHaveValue(/--confirmation-evidence "See receipt 1\/2 locally"/);
+  await expect(form.locator('textarea')).toHaveValue(/--confirmed-at "2026-10-23T00:05:00\+08:00"/);
+  await expect(form.locator('textarea')).toHaveValue(/--confirm-submitted$/);
+
+  await page.getByRole('button', { name: 'Saved matches' }).click();
+  const saved = page.locator('[data-match-key="job_active"]');
+  await expect(saved.getByTestId('confirm-application')).toBeVisible();
+  await saved.getByLabel('Confirmation note').fill('token $ secret');
+  await saved.getByLabel('Resume version').fill('backend-v2');
+  await saved.getByLabel('Confirmed at').fill('2026-10-23T00:05:00Z');
+  await saved.getByRole('checkbox', { name: 'I verified this submission on the official site' }).check();
+  await saved.getByRole('button', { name: 'Copy confirmation command' }).click();
+  await expect(saved.locator('.confirm-error')).toContainText('simple punctuation');
+  await expect(saved.locator('textarea')).toBeHidden();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'List' }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  expect(errors.consoleErrors).toEqual([]);
+  expect(errors.pageErrors).toEqual([]);
+});
+
 test('an Applied marker needs explicit local confirmation and survives stale browser state after rebuild', async ({ page }) => {
   await openDashboard(page, { width: 1440, height: 1000 });
   const card = page.locator('[data-key="job_active"]');

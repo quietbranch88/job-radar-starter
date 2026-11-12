@@ -139,6 +139,9 @@ def test_dashboard_preserves_the_private_versions_triage_workflow_without_privat
     assert "ArrowRight" in html
     assert "ArrowUp" in html
     assert "Export status" in html
+    assert "data-testid=\"confirm-application\"" in html
+    assert "Copy confirmation command" in html
+    assert "Recorded in local tracking." in html
     assert "job-radar-status" in html
     assert "[hidden]{display:none!important}" in html
     assert ".command{margin-inline:-11px}" in html

@@ -79,7 +79,11 @@ def _parser() -> argparse.ArgumentParser:
     _add_profile_argument(doctor)
     doctor.add_argument("--jobs-output", type=Path, default=DEFAULT_JOBS)
     doctor.add_argument("--dashboard-output", type=Path, default=DEFAULT_DASHBOARD)
-    doctor.add_argument("--ai-command", nargs=argparse.REMAINDER)
+    doctor.add_argument(
+        "--ai-command",
+        nargs=argparse.REMAINDER,
+        help="compatibility scoring command; prefer review --provider-command",
+    )
 
     init = commands.add_parser(
         "init",
@@ -114,7 +118,7 @@ def _parser() -> argparse.ArgumentParser:
     score.add_argument(
         "--ai-command",
         nargs=argparse.REMAINDER,
-        help="executable and arguments; must be the final job-radar option",
+        help="compatibility scoring command; must be the final option. Compact review is review --provider-command",
     )
 
     run = commands.add_parser("run", help="scan, score, write JSON, and build the dashboard")
@@ -139,7 +143,7 @@ def _parser() -> argparse.ArgumentParser:
     command_group.add_argument(
         "--ai-command",
         nargs=argparse.REMAINDER,
-        help="executable and arguments; must be the final job-radar option",
+        help="compatibility scoring command; must be the final option. Prefer --provider-command",
     )
 
     schedule = commands.add_parser("schedule", help="render a scheduler configuration")

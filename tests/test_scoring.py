@@ -82,13 +82,51 @@ def _jobs():
     ]
 
 
+def test_short_skills_match_whole_tokens_and_local_weights(tmp_path: Path):
+    config = _config(tmp_path)
+    scored = application.score_jobs(
+        [
+            Job(
+                "greenhouse", "inside", "Northstar Robotics", "Algorithm Engineer",
+                "Toronto, Canada", "https://example.com/inside", "2026-07-15",
+                country="CA", category="backend", tracks=("backend",), visa_supported=True,
+            ),
+            Job(
+                "greenhouse", "cpp", "Northstar Robotics", "Senior C++ Engineer",
+                "Toronto, Canada", "https://example.com/cpp", "2026-07-15",
+                country="CA", visa_supported=True,
+            ),
+        ],
+        replace(config, profile=replace(config.profile, skills=("Go", "C++", "C"))),
+    )
+    by_id = {job.external_id: job for job in scored}
+
+    assert "skills:" not in by_id["inside"].summary
+    assert "Golang" not in by_id["inside"].summary
+    assert "skills: C++" in by_id["cpp"].summary
+    assert "skills: C," not in by_id["cpp"].summary
+    assert not by_id["cpp"].summary.endswith("C")
+
+    weighted = replace(
+        config.matching,
+        weights=replace(config.matching.weights, skill=0, skill_cap=0),
+    )
+    rescored = application.score_jobs(_jobs(), replace(config, matching=weighted))
+    strong = next(job for job in rescored if job.external_id == "strong")
+    assert strong.score == 85
+    assert "skills: Go" in strong.summary
+
+
 def test_rule_based_scoring_uses_local_preferences_and_explicit_exclusions(tmp_path: Path):
     scored = application.score_jobs(_jobs(), _config(tmp_path))
     by_id = {job.external_id: job for job in scored}
 
-    assert 65 <= by_id["strong"].score <= 100
+    assert by_id["strong"].score == 93
     assert by_id["strong"].score > by_id["weak"].score
     assert "local preferences" in by_id["strong"].summary
+    assert "role: backend" in by_id["strong"].summary
+    assert "skills: Go" in by_id["strong"].summary
+    assert "must-have: backend" in by_id["strong"].summary
     assert by_id["blocked"].score == 0
     assert "excluded company" in by_id["blocked"].risk
 
@@ -140,6 +178,7 @@ def test_ai_command_scores_known_jobs_without_reading_resume_or_using_a_shell(tm
     assert captured.get("shell") is not True
     assert "PRIVATE_RESUME_CONTENT_SHOULD_NOT_LEAVE_PROCESS" not in captured["input"]
     assert "private application note" not in captured["input"]
+    assert "weights" not in json.loads(captured["input"])["matching"]
     assert "private interview note" not in captured["input"]
     assert strong.score == 94
     assert strong.tracks == ("backend", "ai-product")
