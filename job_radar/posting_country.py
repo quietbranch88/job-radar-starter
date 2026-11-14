@@ -41,10 +41,20 @@ def _listed(countries: Sequence[str] | str) -> tuple[str, ...]:
     return tuple(code.strip() for code in countries if isinstance(code, str) and code.strip())
 
 
+# These codes are also ordinary location tokens: CA is California, IN is
+# Indiana, and DE is the German article inside Île-de-France. Match them by
+# the country name only.
+_AMBIGUOUS_CODES = frozenset({"ca", "in", "de"})
+_REGION_HINTS = frozenset({"england", "scotland", "wales"})
+_FALSE_FRIEND = re.compile(
+    r"(?<![a-z0-9])new england(?![a-z0-9])|(?<![a-z0-9])new south wales(?![a-z0-9])"
+)
+
+
 def _contains_term(text: str, term: str) -> bool:
-    if len(term) <= 3:
-        return re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text) is not None
-    return term in text
+    if term in _REGION_HINTS and _FALSE_FRIEND.search(text):
+        return False
+    return re.search(rf"(?<![a-z0-9-]){re.escape(term)}(?![a-z0-9-])", text) is not None
 
 
 def location_matches_country(location: str, code: str) -> bool:
@@ -54,7 +64,8 @@ def location_matches_country(location: str, code: str) -> bool:
     folded = code.strip().casefold()
     if not text or not folded:
         return False
-    terms = (folded, *_HINTS.get(folded, ()))
+    hints = _HINTS.get(folded, ())
+    terms = hints if folded in _AMBIGUOUS_CODES else (folded, *hints)
     return any(_contains_term(text, term) for term in terms)
 
 
