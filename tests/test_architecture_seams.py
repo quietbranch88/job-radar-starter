@@ -18,6 +18,16 @@ def test_one_market_stays_on_the_posting_and_several_follow_location():
     assert posting_country(("SG", "US"), "Singapore") == "SG"
     assert posting_country(("SG", "US"), "New York") == ""
     assert posting_country("SG,US", "United States") == "US"
+    assert posting_country(("US", "CA"), "San Francisco, CA") == ""
+    assert posting_country(("US", "CA"), "Toronto, Canada") == "CA"
+    assert posting_country(("US", "CA"), "Remote - US") == "US"
+    assert posting_country(("GB", "US"), "New England") == ""
+    assert posting_country(("GB", "US"), "New England, United Kingdom") == "GB"
+    assert posting_country(("GB", "US"), "New South Wales") == ""
+    assert posting_country(("IN", "US"), "Indianapolis, IN") == ""
+    assert posting_country(("DE", "FR"), "Île-de-France") == ""
+    assert posting_country(("DE", "FR"), "Berlin, Germany") == "DE"
+    assert posting_country(("DE", "FR"), "Berlin, DE") == ""
 
 
 def test_browser_markers_fold_application_states():

@@ -13,12 +13,14 @@ source fails. Best-effort mode writes partial healthy-source results with
 `incomplete: true` and structured failures. Treat incomplete scans as partial,
 not as proof that missing companies have no jobs.
 
-An official request retries HTTP 429 at most twice. The wait is the server's
-`Retry-After` when that delay is from 0 through 5 seconds. A missing header
-waits 1 second. A longer delay is not retried, so the scan does not sleep past
-the per-source budget or call the board again early. That company is then
-reported as rate limited. Use `--mode best-effort` when one failed board
-should not hold back the boards that succeeded. The default remains `atomic`.
+An official request asks for gzip and keeps the decompressed body inside the
+same 50 MiB cap. A redirect stays on HTTPS. The request retries HTTP 429 at
+most twice. The wait is the server's `Retry-After` when that delay is from 0
+through 5 seconds. A missing header waits 1 second. A longer delay is not
+retried, so the scan does not sleep past the per-source budget or call the
+board again early. That company is then reported as rate limited. Use
+`--mode best-effort` when one failed board should not hold back the boards
+that succeeded. The default remains `atomic`.
 
 ## 2. Normalize, score, and review
 
@@ -48,10 +50,13 @@ configured review in a child process and stops that process at the deadline.
 receives scoring and repository behavior through callable or protocol ports
 instead of importing those concrete adapters.
 
-Local rules match preferences as whole tokens. A skill such as `Go` does not
-match inside `algorithm` or `Golang`. `C++` and `C#` stay intact, and a
-hyphenated term such as `ai-product` matches the consecutive words. The summary
-names the matched role, track, skill, and must-have terms. Optional
+Local rules match preferences as whole tokens inside one field and one
+sentence. A skill such as `Go` does not match inside `algorithm`, `Golang`,
+`go-to-market`, or a description that only says "go live". `Go`, `C`, `R`, and
+`AI` are read from the title, category, tracks, and skills. `C++` and `C#`
+stay intact, and a hyphenated term such as `ai-product` matches the consecutive
+words in that same field. The summary separates each matched category with a
+semicolon. Optional
 `matching.weights` in the local profile replaces the default point values.
 Those weights stay on this machine and are not included in a review request.
 

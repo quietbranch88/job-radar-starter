@@ -61,7 +61,7 @@ def load_jobs(path: Path) -> list[Job]:
 
 def load_jobs_document(path: Path) -> tuple[str, Any, list[Job]]:
     raw = json.loads(path.read_text(encoding="utf-8"))
-    jobs = load_jobs(path)
+    jobs = [job_from_dict(item) for item in job_items(raw)]
     if isinstance(raw, list):
         return "legacy", raw, jobs
     if set(raw) - {"observed_on", "latest_observed_on"} == {

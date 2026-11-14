@@ -5,12 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import timezone
 from email.utils import parsedate_to_datetime
+import gzip
 import json
 import time
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 MAX_RESPONSE_BYTES = 50 * 1024 * 1024
@@ -49,6 +50,73 @@ def _retry_wait_seconds(
     return wait
 
 
+class _BoundedReader:
+    """Cap how much of a redirect body is consumed before the next request."""
+
+    def __init__(self, raw: Any, limit: int) -> None:
+        self._raw = raw
+        self._left = limit
+
+    def read(self, size: int = -1) -> bytes:
+        if self._left <= 0:
+            return b""
+        if size is None or size < 0 or size > self._left:
+            size = self._left
+        chunk = self._raw.read(size)
+        if not isinstance(chunk, (bytes, bytearray)):
+            chunk = bytes(chunk)
+        self._left -= len(chunk)
+        return bytes(chunk)
+
+    def close(self) -> None:
+        close = getattr(self._raw, "close", None)
+        if close is not None:
+            close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._raw, name)
+
+
+class _HttpsOnlyRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str):
+        target = urlsplit(newurl)
+        if target.scheme != "https" or not target.hostname:
+            raise HTTPError(
+                getattr(req, "full_url", newurl),
+                code,
+                "official source redirect must use HTTPS",
+                headers,
+                fp,
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    def http_error_302(self, req: Request, fp: Any, code: int, msg: str, headers: Any):
+        bounded = _BoundedReader(fp, MAX_RESPONSE_BYTES + 1)
+        return HTTPRedirectHandler.http_error_302(self, req, bounded, code, msg, headers)
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
+
+_OPENER = build_opener(_HttpsOnlyRedirectHandler)
+
+
+def urlopen(request: Request, timeout: int = 30):
+    """Open one official request. Tests replace this name."""
+
+    return _OPENER.open(request, timeout=timeout)
+
+
+def _read_body(response: Any) -> bytes:
+    headers = getattr(response, "headers", None)
+    encoding = ""
+    if headers is not None and hasattr(headers, "get"):
+        encoding = str(headers.get("Content-Encoding") or "")
+    if "gzip" in encoding.casefold():
+        with gzip.GzipFile(fileobj=response) as decoder:
+            return decoder.read(MAX_RESPONSE_BYTES + 1)
+    return response.read(MAX_RESPONSE_BYTES + 1)
+
+
 def http_get_json(
     url: str,
     *,
@@ -69,6 +137,7 @@ def http_get_json(
         url,
         headers={
             "Accept": "application/json",
+            "Accept-Encoding": "gzip",
             "User-Agent": "job-radar-starter/0.1 (local single-user client)",
         },
     )
@@ -77,7 +146,7 @@ def http_get_json(
         attempt += 1
         try:
             with urlopen(request, timeout=timeout) as response:
-                raw = response.read(MAX_RESPONSE_BYTES + 1)
+                raw = _read_body(response)
             break
         except HTTPError as error:
             status = error.code

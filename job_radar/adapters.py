@@ -1,6 +1,5 @@
 import hashlib
 from datetime import datetime, timezone
-from html import unescape
 from html.parser import HTMLParser
 from typing import Any, Callable
 
@@ -109,7 +108,8 @@ def _public_jd(source: str, **fields: Any) -> dict[str, Any]:
         if not isinstance(value, str) or not value.strip():
             continue
         parser = _PostingText()
-        parser.feed(unescape(value))
+        parser.feed(value)
+        parser.close()
         text = " ".join("".join(parser.parts).split())
         if text:
             texts.append(text)
