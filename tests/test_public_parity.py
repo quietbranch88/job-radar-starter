@@ -210,3 +210,12 @@ def test_confirmation_replay_cannot_downgrade_or_rewrite_an_application(tmp_path
     assert code == 2
     assert "conflicting confirmed application replay" in json.loads(output)["error"]["message"]
     assert store.read("applications") == before
+    args[args.index("--resume-version") + 1] = "backend-v2"
+    args[args.index("--confirmed-at") + 1] = "2026-10-23T08:05:00+08:00"
+    assert invoke(args)[0] == 0
+    assert store.read("applications") == before
+    args[args.index("--confirmed-at") + 1] = "2026-10-23T01:05:00Z"
+    code, output, _ = invoke(args)
+    assert code == 2
+    assert "conflicting confirmed application replay" in json.loads(output)["error"]["message"]
+    assert store.read("applications") == before

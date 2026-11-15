@@ -197,6 +197,84 @@ def test_pending_event_transaction_is_recovered_before_state_is_read(
     assert not journal.exists()
 
 
+def test_finished_event_transaction_is_kept_when_the_journal_remains(
+    storage: ModuleType,
+    tmp_path: Path,
+):
+    root = tmp_path / "user-data"
+    store = storage.LocalTrackingStore(root)
+    store.initialize()
+    before_applications = _document("application-before")
+    before_events = _document("event-before")
+    after_applications = _document("application-after")
+    after_events = _document("event-after")
+    store.write("applications", before_applications)
+    store.write("events", before_events)
+    store.write("applications", after_applications)
+    store.write("events", after_events)
+    journal = root / "tracking" / ".application-event.journal.json"
+    journal.write_text(
+        json.dumps(
+            {
+                "contract_version": 1,
+                "transaction": "application_event",
+                "before": {
+                    "applications": before_applications,
+                    "events": before_events,
+                },
+                "after": {
+                    "applications": after_applications,
+                    "events": after_events,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert store.read("applications") == after_applications
+    assert store.read("events") == after_events
+    assert not journal.exists()
+
+
+def test_partial_event_transaction_with_an_after_image_rolls_back(
+    storage: ModuleType,
+    tmp_path: Path,
+):
+    root = tmp_path / "user-data"
+    store = storage.LocalTrackingStore(root)
+    store.initialize()
+    before_applications = _document("application-before")
+    before_events = _document("event-before")
+    store.write("applications", before_applications)
+    store.write("events", before_events)
+    journal = root / "tracking" / ".application-event.journal.json"
+    journal.write_text(
+        json.dumps(
+            {
+                "contract_version": 1,
+                "transaction": "application_event",
+                "before": {
+                    "applications": before_applications,
+                    "events": before_events,
+                },
+                "after": {
+                    "applications": _document("application-after"),
+                    "events": _document("event-after"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    store.path_for("applications").write_text(
+        json.dumps(_document("application-after")),
+        encoding="utf-8",
+    )
+
+    assert store.read("applications") == before_applications
+    assert store.read("events") == before_events
+    assert not journal.exists()
+
+
 def test_malformed_event_journal_is_preserved_and_does_not_overwrite_state(
     storage: ModuleType,
     tmp_path: Path,

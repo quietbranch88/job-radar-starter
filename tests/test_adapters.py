@@ -22,7 +22,7 @@ def test_structured_board_countries_are_kept_only_when_the_board_names_one():
                     "location": {"name": "San Francisco, CA"},
                     "offices": [
                         {"location": "New York, United States"},
-                        {"location": "Austin, United States"},
+                        {"location": "San Francisco"},
                     ],
                 }
             ]
@@ -41,7 +41,7 @@ def test_structured_board_countries_are_kept_only_when_the_board_names_one():
                     "absolute_url": "https://example.test/10",
                     "location": {"name": "San Francisco, CA"},
                     "offices": [
-                        {"location": "San Francisco, CA"},
+                        {"location": "New York, United States"},
                         {"location": "Toronto, Canada"},
                     ],
                 }

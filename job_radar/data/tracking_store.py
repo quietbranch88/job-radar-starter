@@ -107,6 +107,10 @@ class LocalTrackingStore:
             "contract_version": 1,
             "transaction": "application_event",
             "before": before,
+            "after": {
+                "applications": applications,
+                "events": events,
+            },
         }
         journal_path = self._journal_path()
         self._atomic_write(
@@ -202,18 +206,32 @@ class LocalTrackingStore:
         if not journal_path.exists():
             return
         journal = self._read_path(journal_path)
+        if not isinstance(journal, dict):
+            raise StateRecoveryRequired(journal_path)
+        keys = set(journal)
+        legacy = keys == {"contract_version", "transaction", "before"}
+        durable = keys == {"contract_version", "transaction", "before", "after"}
+        before = self._event_pair(journal.get("before"))
+        after = self._event_pair(journal.get("after")) if durable else None
         if (
-            not isinstance(journal, dict)
-            or set(journal) != {"contract_version", "transaction", "before"}
+            not (legacy or durable)
             or journal.get("contract_version") != 1
             or journal.get("transaction") != "application_event"
-            or not isinstance(journal.get("before"), dict)
-            or set(journal["before"]) != {"applications", "events"}
+            or before is None
+            or (durable and after is None)
         ):
             raise StateRecoveryRequired(journal_path)
-        before = journal["before"]
         self._validate_versioned_items("applications", before["applications"])
         self._validate_versioned_items("events", before["events"])
+        if after is not None:
+            self._validate_versioned_items("applications", after["applications"])
+            self._validate_versioned_items("events", after["events"])
+            if (
+                self._stored_matches("applications", after["applications"])
+                and self._stored_matches("events", after["events"])
+            ):
+                journal_path.unlink()
+                return
         self._atomic_write(
             self.path_for("applications"),
             before["applications"],
@@ -225,6 +243,21 @@ class LocalTrackingStore:
             replace_file=_default_replace,
         )
         journal_path.unlink()
+
+    @staticmethod
+    def _event_pair(value: Any) -> dict[str, Any] | None:
+        if isinstance(value, dict) and set(value) == {"applications", "events"}:
+            return value
+        return None
+
+    def _stored_matches(self, kind: str, expected: Any) -> bool:
+        path = self.path_for(kind)
+        if not path.exists():
+            return False
+        try:
+            return self._read_path(path) == expected
+        except StateRecoveryRequired:
+            return False
 
     @staticmethod
     def _validate_versioned_items(kind: str, document: Any) -> None:

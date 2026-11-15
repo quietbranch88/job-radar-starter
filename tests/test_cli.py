@@ -52,9 +52,25 @@ def test_schedule_render_is_safe_and_does_not_install_anything(tmp_path: Path):
 
     assert cron.startswith("15 8 * * *")
     assert "job-radar" in cron
+    assert "catalog/sources.yaml" in cron
+    assert "user-data/sources.yaml" not in cron
     assert "New-ScheduledTaskAction" in windows
     assert "08:15" in windows
     assert "Register-ScheduledTask" in windows
+    assert "catalog/sources.yaml" in windows
+
+    personal = tmp_path / "user-data" / "sources.yaml"
+    personal.parent.mkdir()
+    personal.write_text("countries: {}\n", encoding="utf-8")
+    personal_cron = cli.render_schedule(
+        platform="cron",
+        daily_at="08:15",
+        project_dir=tmp_path,
+        executable=tmp_path / ".venv" / "bin" / "job-radar",
+    )
+    assert "user-data/sources.yaml" in personal_cron
+    assert "catalog/sources.yaml" not in personal_cron
+    assert not (tmp_path / "user-data" / "job-radar.cron").exists()
 
 
 def _write_ready_catalog(path: Path) -> None:
