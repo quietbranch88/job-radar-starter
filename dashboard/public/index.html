@@ -91,6 +91,7 @@
     let rejectedRenderLimit=REJECTED_PAGE_SIZE;
     let cards=[...document.querySelectorAll('.job-card')];
     const byKey=new Map(JOBS.map(job=>[jobKey(job),job]));
+    const searchText=new Map(JOBS.map(job=>[jobKey(job),[job.company,job.title,job.location,job.category,job.summary,...list(job.tracks),...list(job.skills)].join(' ').toLowerCase()]));
     const newestDate=JOBS.map(job=>Date.parse(job.first_seen||job.published_at||'')).filter(Number.isFinite).sort((a,b)=>b-a)[0]||Date.now();
 
     function migrateLegacyState(value){const migrated={...value};JOBS.forEach(job=>{const stable=job.stable_id||`${job.source}:${job.external_id}`;if(migrated[stable])return;const legacyKeys=[`${job.source}:${job.external_id}`,job.url,...list(job.legacy_status_keys)].filter(Boolean);for(const legacy of legacyKeys){if(migrated[legacy]){migrated[stable]=migrated[legacy];delete migrated[legacy];break}}});return migrated}
@@ -103,7 +104,7 @@
     function statusOf(job){return DASHBOARD.tracking.statuses[jobKey(job)]||state[jobKey(job)]||''}
     function setStatus(job,next){const key=jobKey(job);if(DASHBOARD.tracking.statuses[key])return;const before=state[key]||'';undoStack.push({key,before});if(next&&next!==before)state[key]=next;else delete state[key];saveState();renderAll()}
     function ageDays(job){const value=Date.parse(job.first_seen||job.published_at||'');return Number.isFinite(value)?Math.max(0,Math.round((newestDate-value)/86400000)):9999}
-    function matches(job){const text=[job.company,job.title,job.location,job.category,job.summary,...list(job.tracks),...list(job.skills)].join(' ').toLowerCase(),query=document.querySelector('#searchBox').value.trim().toLowerCase(),status=statusOf(job),review=rejectedIds.has(job.stable_id)?'rejected':'accepted';return(!query||text.includes(query))&&(!filters.country||job.country===filters.country)&&(!filters.track||list(job.tracks).includes(filters.track))&&(!filters.category||job.category===filters.category)&&(!filters.skill||list(job.skills).includes(filters.skill))&&(!filters.freshness||job.freshness===filters.freshness)&&(!filters.source||job.source===filters.source)&&(!filters.status||status===filters.status)&&(!filters.review||review===filters.review)}
+    function matches(job){const text=searchText.get(jobKey(job))||'',query=document.querySelector('#searchBox').value.trim().toLowerCase(),status=statusOf(job),review=rejectedIds.has(job.stable_id)?'rejected':'accepted';return(!query||text.includes(query))&&(!filters.country||job.country===filters.country)&&(!filters.track||list(job.tracks).includes(filters.track))&&(!filters.category||job.category===filters.category)&&(!filters.skill||list(job.skills).includes(filters.skill))&&(!filters.freshness||job.freshness===filters.freshness)&&(!filters.source||job.source===filters.source)&&(!filters.status||status===filters.status)&&(!filters.review||review===filters.review)}
     function visibleJobs(){return JOBS.filter(matches).sort((a,b)=>(b.score??-1)-(a.score??-1))}
     function pendingJobs(){return visibleJobs().filter(job=>!statusOf(job))}
 

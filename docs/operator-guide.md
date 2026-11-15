@@ -22,6 +22,12 @@ board again early. That company is then reported as rate limited. Use
 `--mode best-effort` when one failed board should not hold back the boards
 that succeeded. The default remains `atomic`.
 
+A company that lists more than one market keeps a structured country when
+that country is one of its markets. Lever reads `country`. Ashby reads
+`address.postalAddress.addressCountry`. Greenhouse reads a country only when
+every office location names that same country. A city line such as
+`San Francisco, CA` stays unlabeled when the board does not name the country.
+
 ## 2. Normalize, score, and review
 
 Stable IDs and aliases prevent the same application from splitting when a

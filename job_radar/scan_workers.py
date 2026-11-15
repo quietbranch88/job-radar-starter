@@ -16,7 +16,7 @@ from job_radar.adapters import (
     fetch_greenhouse,
     fetch_lever,
 )
-from job_radar.posting_country import posting_country
+from job_radar.posting_country import resolve_posting_country
 
 
 _FETCHERS = {
@@ -87,7 +87,7 @@ def _fetch_scoped_jobs(
         max_jobs=max_jobs_per_source,
     )
     return [
-        replace(job, country=posting_country(country_scope, job.location))
+        replace(job, country=resolve_posting_country(country_scope, job.location, job.country))
         for job in fetched
     ]
 
