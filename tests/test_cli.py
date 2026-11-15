@@ -29,6 +29,13 @@ def test_build_dashboard_command_reads_normalized_json(tmp_path: Path):
     assert "Backend Engineer" in output.read_text(encoding="utf-8")
 
 
+def test_omitted_walk_date_defaults_to_the_utc_calendar():
+    today = cli.utc_observation_date()
+    parser = cli._parser()
+    assert parser.parse_args(["run"]).observed_on == today
+    assert parser.parse_args(["review", "--jobs", "jobs.json", "--output", "out.json"]).observed_on == today
+
+
 def test_help_exposes_the_complete_daily_pipeline():
     help_text = cli._parser().format_help()
 

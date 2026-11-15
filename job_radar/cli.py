@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import asdict
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -26,6 +26,7 @@ from job_radar.pipeline import (
 from job_radar.source_orchestration import (
     AtomicSourceScanFailed,
     scan_catalog_resilient,
+    utc_observation_date,
 )
 
 
@@ -134,7 +135,11 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--dashboard-output", type=Path, default=DEFAULT_DASHBOARD)
     run.add_argument("--user-data", type=Path, default=DEFAULT_USER_DATA)
     run.add_argument("--aliases", type=Path, default=DEFAULT_ALIASES)
-    run.add_argument("--observed-on", default=date.today().isoformat())
+    run.add_argument(
+        "--observed-on",
+        default=utc_observation_date(),
+        help="ISO date for this walk; default is the current UTC date",
+    )
     run.add_argument(
         "--mode",
         choices=("atomic", "best-effort"),
@@ -185,7 +190,11 @@ def _parser() -> argparse.ArgumentParser:
     review.add_argument("--jobs", type=Path, required=True)
     review.add_argument("--output", type=Path, required=True)
     review.add_argument("--user-data", type=Path, default=DEFAULT_USER_DATA)
-    review.add_argument("--observed-on", default=date.today().isoformat())
+    review.add_argument(
+        "--observed-on",
+        default=utc_observation_date(),
+        help="ISO date for this review; default is the current UTC date",
+    )
     _add_review_arguments(review)
 
     tracking = commands.add_parser(

@@ -114,7 +114,8 @@ with an intact result digest is reused. Digests detect accidental state changes;
 they are not signatures against a hostile local account. Checkpoints have a
 128 MiB document ceiling and retain the configured per-company job-count limit.
 Each completed result's optional scan-job `last_seen` is the UTC date of that
-company's actual `fetched_at`, validated on resume. Earlier cached companies are
+company's actual `fetched_at`, validated on resume. When `observed_on` is
+omitted, the walk date is that same current UTC date. Earlier cached companies are
 not redated when another company succeeds later. A lifecycle's evaluation date
 may advance beyond the original walk date, without changing either job's actual
 observation date. Future-dated postings are checked against their own observation.

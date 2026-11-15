@@ -26,10 +26,13 @@ A company that lists more than one market keeps a structured country when
 that country is one of its markets. Lever reads `country`. Ashby reads
 `address.postalAddress.addressCountry`. Greenhouse uses a country when every
 office that names one names the same country. An office that only names a
-city, such as `San Francisco`, is skipped. `San Francisco, CA` still does not
-count as Canada. `job-radar schedule render` prints a daily command and does
-not install it. When `user-data/sources.yaml` is already in the project
-directory, that command scans that file. Otherwise it scans
+city, such as `San Francisco` or `Taipei`, is skipped. `Taiwan` and a
+structured country field of `TW` count as Taiwan. `San Francisco, CA` still
+does not count as Canada. When `scan`, `run`, or `review` omits
+`--observed-on`, the walk date is the current UTC date, the same calendar a
+checkpoint stores in `last_seen`. `job-radar schedule render` prints a daily
+command and does not install it. When `user-data/sources.yaml` is already in
+the project directory, that command scans that file. Otherwise it scans
 `catalog/sources.yaml`.
 
 ## 2. Normalize, score, and review

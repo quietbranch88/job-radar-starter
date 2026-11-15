@@ -13,6 +13,7 @@ _HINTS = {
     "gb": ("united kingdom", "u.k.", "uk", "england", "scotland", "wales"),
     "sg": ("singapore",),
     "jp": ("japan",),
+    "tw": ("taiwan",),
     "au": ("australia",),
     "de": ("germany",),
     "fr": ("france",),
