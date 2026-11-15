@@ -11,6 +11,106 @@ from job_radar.adapters import (
 )
 
 
+def test_structured_board_countries_are_kept_only_when_the_board_names_one():
+    greenhouse = parse_greenhouse(
+        {
+            "jobs": [
+                {
+                    "id": 9,
+                    "title": "Backend",
+                    "absolute_url": "https://example.test/9",
+                    "location": {"name": "San Francisco, CA"},
+                    "offices": [
+                        {"location": "New York, United States"},
+                        {"location": "Austin, United States"},
+                    ],
+                }
+            ]
+        },
+        company="Example",
+    )
+    assert greenhouse[0].country == "US"
+    assert greenhouse[0].location == "San Francisco, CA"
+
+    disagreed = parse_greenhouse(
+        {
+            "jobs": [
+                {
+                    "id": 10,
+                    "title": "Backend",
+                    "absolute_url": "https://example.test/10",
+                    "location": {"name": "San Francisco, CA"},
+                    "offices": [
+                        {"location": "San Francisco, CA"},
+                        {"location": "Toronto, Canada"},
+                    ],
+                }
+            ]
+        },
+        company="Example",
+    )
+    assert disagreed[0].country == ""
+
+    lever = parse_lever(
+        [{
+            "id": "sf",
+            "text": "Backend",
+            "hostedUrl": "https://example.test/sf",
+            "categories": {"location": "San Francisco"},
+            "country": "CA",
+        }],
+        company="Example",
+    )
+    assert lever[0].country == "CA"
+    assert parse_lever(
+        [{**_posting(parse_lever), "country": "California"}],
+        "Example",
+    )[0].country == ""
+
+    ashby = parse_ashby(
+        {
+            "jobs": [
+                {
+                    "id": "sf",
+                    "title": "Backend",
+                    "jobUrl": "https://example.test/sf",
+                    "location": "San Francisco, CA",
+                    "isListed": True,
+                    "address": {"postalAddress": {"addressCountry": "United States"}},
+                }
+            ]
+        },
+        company="Example",
+    )
+    assert ashby[0].country == "US"
+    assert parse_ashby(
+        {"jobs": [{**_posting(parse_ashby), "address": "San Francisco", "isListed": True}]},
+        "Example",
+    )[0].country == ""
+
+
+def test_greenhouse_html_keeps_entities_and_drops_script_bodies():
+    jobs = parse_greenhouse(
+        {
+            "jobs": [
+                {
+                    "id": 8,
+                    "title": "Backend",
+                    "absolute_url": "https://example.test/8",
+                    "content": "<p>Go &amp; SQL</p><script>secret()</script><p>&lt;script&gt;kept&lt;/script&gt;</p>R&amp;D trailing &",
+                }
+            ]
+        },
+        company="Example",
+    )
+    evidence = " ".join(jobs[0].jd_evidence)
+    assert "Go & SQL" in evidence
+    assert "secret" not in evidence
+    assert "<script>kept</script>" in evidence
+    assert "R&D" in evidence
+    assert evidence.endswith("&") or evidence.rstrip().endswith("&")
+
+
 def test_greenhouse_normalizes_published_jobs():
     jobs = parse_greenhouse(
         {"jobs": [{"id": 7, "title": "Backend Engineer", "absolute_url": "https://example/jobs/7", "location": {"name": "Toronto"}, "updated_at": "2026-07-13T00:00:00Z"}]},

@@ -290,3 +290,109 @@ matching: {minimum_score: 50, must_have: [backend]}
     assert report["counts"] == {"scanned": 1, "published": 1}
     assert report["jobs_output"] == str(jobs.resolve())
     assert report["dashboard_output"] == str(dashboard.resolve())
+
+
+def test_run_timeouts_stay_options_when_they_precede_the_provider_command():
+    args = cli._parser().parse_args(
+        [
+            "run",
+            "--per-call-timeout",
+            "9",
+            "--total-review-deadline",
+            "11",
+            "--max-fast-calls",
+            "3",
+            "--provider-command",
+            "echo",
+            "hi",
+        ]
+    )
+    assert args.per_call_timeout == 9.0
+    assert args.total_review_deadline == 11.0
+    assert args.max_fast_calls == 3
+    assert args.provider_command == ["echo", "hi"]
+    run_parser = cli._parser()._subparsers._group_actions[0].choices["run"]
+    help_text = run_parser.format_help()
+    assert help_text.index("--per-call-timeout") < help_text.index("--provider-command")
+
+
+def test_doctor_checks_a_provider_command_separately(tmp_path: Path):
+    catalog = tmp_path / "catalog.yaml"
+    profile = tmp_path / "profile.yaml"
+    _write_ready_catalog(catalog)
+    _write_profile(profile)
+    stdout = StringIO()
+    status = main(
+        [
+            "--json",
+            "doctor",
+            "--catalog",
+            str(catalog),
+            "--profile",
+            str(profile),
+            "--jobs-output",
+            str(tmp_path / "scans" / "latest.json"),
+            "--dashboard-output",
+            str(tmp_path / "dashboard" / "index.html"),
+            "--provider-command",
+            "job-radar-missing-provider",
+        ],
+        stdout=stdout,
+    )
+    report = json.loads(stdout.getvalue())
+    assert status == 1
+    assert report["ok"] is False
+    assert report["provider"]["ready"] is False
+    assert report["ai"]["mode"] == "local_rules"
+
+
+def test_atomic_failure_names_the_board_and_leaves_the_jobs_file(tmp_path: Path):
+    from job_radar.source_orchestration import AtomicSourceScanFailed
+
+    catalog = tmp_path / "catalog.yaml"
+    _write_ready_catalog(catalog)
+    jobs = tmp_path / "scans" / "latest.json"
+    jobs.parent.mkdir()
+    jobs.write_text('{"keep": true}\n', encoding="utf-8")
+
+    def scan_runner(_catalog, _transport, **_kwargs):
+        raise AtomicSourceScanFailed(
+            {
+                "contract_version": 1,
+                "mode": "atomic",
+                "incomplete": True,
+                "jobs": [],
+                "failures": [
+                    {
+                        "source": "ashby",
+                        "company": "Example",
+                        "category": "http_403",
+                        "message": "forbidden",
+                    }
+                ],
+            }
+        )
+
+    stderr = StringIO()
+    status = main(
+        ["scan", "--catalog", str(catalog), "--output", str(jobs), "--mode", "atomic"],
+        scan_runner=scan_runner,
+        stdout=StringIO(),
+        stderr=stderr,
+    )
+    text = stderr.getvalue()
+    assert status == 2
+    assert "Example / ashby / http_403" in text
+    assert f"Jobs file left unchanged: {jobs}" in text
+    assert jobs.read_text(encoding="utf-8") == '{"keep": true}\n'
+
+    stdout = StringIO()
+    status = main(
+        ["--json", "scan", "--catalog", str(catalog), "--output", str(jobs)],
+        scan_runner=scan_runner,
+        stdout=stdout,
+        stderr=StringIO(),
+    )
+    report = json.loads(stdout.getvalue())
+    assert status == 2
+    assert report["failures"][0]["category"] == "http_403"

@@ -1,10 +1,10 @@
 import hashlib
 from datetime import datetime, timezone
-from html import unescape
 from html.parser import HTMLParser
 from typing import Any, Callable
 
 from job_radar.domain.jobs import Job, MAX_JD_EVIDENCE_CHARS, MAX_JD_EVIDENCE_ITEMS
+from job_radar.posting_country import agreed_country, stated_country_code
 
 
 JsonGetter = Callable[[str], Any]
@@ -109,7 +109,8 @@ def _public_jd(source: str, **fields: Any) -> dict[str, Any]:
         if not isinstance(value, str) or not value.strip():
             continue
         parser = _PostingText()
-        parser.feed(unescape(value))
+        parser.feed(value)
+        parser.close()
         text = " ".join("".join(parser.parts).split())
         if text:
             texts.append(text)
@@ -139,6 +140,36 @@ def _lever_jd(item: dict[str, Any]) -> dict[str, Any]:
     return _public_jd("lever", **fields)
 
 
+def _greenhouse_country(item: dict[str, Any]) -> str:
+    offices = item.get("offices")
+    if not isinstance(offices, list):
+        return ""
+    locations: list[str] = []
+    for office in offices:
+        if not isinstance(office, dict):
+            continue
+        location = office.get("location")
+        if isinstance(location, dict):
+            location = location.get("name")
+        if isinstance(location, str):
+            locations.append(location)
+    return agreed_country(locations)
+
+
+def _lever_country(item: dict[str, Any]) -> str:
+    return stated_country_code(item.get("country"))
+
+
+def _ashby_country(item: dict[str, Any]) -> str:
+    address = item.get("address")
+    if not isinstance(address, dict):
+        return ""
+    postal = address.get("postalAddress")
+    if not isinstance(postal, dict):
+        return ""
+    return stated_country_code(postal.get("addressCountry"))
+
+
 def parse_greenhouse(
     payload: dict[str, Any],
     company: str,
@@ -155,6 +186,7 @@ def parse_greenhouse(
             location=_nested_text(item, "location", "name"),
             url=_required_text(item, "absolute_url"),
             published_at=_optional_text(item, "updated_at"),
+            country=_greenhouse_country(item),
             **_public_jd("greenhouse", content=item.get("content")),
         )
         for item in items
@@ -177,6 +209,7 @@ def parse_lever(
             location=_nested_text(item, "categories", "location"),
             url=_required_text(item, "hostedUrl"),
             published_at=_lever_created_at(item),
+            country=_lever_country(item),
             **_lever_jd(item),
         )
         for item in items
@@ -202,6 +235,7 @@ def parse_ashby(
             location=_optional_text(item, "location"),
             url=_optional_text(item, "jobUrl") or _optional_text(item, "applyUrl"),
             published_at=_optional_text(item, "publishedAt"),
+            country=_ashby_country(item),
             **_public_jd("ashby", **(
                 {"descriptionPlain": item.get("descriptionPlain")}
                 if item.get("descriptionPlain") else {"descriptionHtml": item.get("descriptionHtml")}

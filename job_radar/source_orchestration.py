@@ -463,6 +463,16 @@ def _scan_inline(
     )
 
 
+def _json_ready(value: Any) -> Any:
+    """Turn dataclass tuples into lists without parsing the payload twice."""
+
+    if isinstance(value, dict):
+        return {key: _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_json_ready(item) for item in value]
+    return value
+
+
 def _publish_scan(jobs, failures, *, observed_on, mode, output, checkpoint_state):
     failures = sorted(
         failures,
@@ -475,9 +485,7 @@ def _publish_scan(jobs, failures, *, observed_on, mode, output, checkpoint_state
     unique: dict[tuple[str, str], Job] = {}
     for job in sorted(jobs, key=_job_order):
         unique.setdefault(_job_key(job), job)
-    normalized_jobs = json.loads(
-        json.dumps([asdict(job) for job in unique.values()], ensure_ascii=False)
-    )
+    normalized_jobs = [_json_ready(asdict(job)) for job in unique.values()]
     result = {
         "contract_version": 1,
         "observed_on": observed_on,

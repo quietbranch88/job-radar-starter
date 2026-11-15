@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta, timezone
+from email.message import Message
 from io import BytesIO
+import gzip
 
 import pytest
 from urllib.error import HTTPError
+from urllib.request import Request
 
-from job_radar.official_http import http_get_json
+from job_radar.official_http import _HttpsOnlyRedirectHandler, http_get_json
 
 
 class _Response:
@@ -101,3 +104,76 @@ def test_other_http_errors_and_plain_urls_are_not_retried(monkeypatch):
     assert calls["count"] == 1
     with pytest.raises(ValueError, match="HTTPS"):
         http_get_json("http://boards.example/jobs")
+
+
+def test_gzip_response_is_decoded_inside_the_body_cap(monkeypatch):
+    payload = gzip.compress(b'{"jobs": []}')
+    seen = {}
+
+    class _GzipResponse:
+        def __init__(self) -> None:
+            self._raw = BytesIO(payload)
+            self.headers = {"Content-Encoding": "gzip"}
+
+        def read(self, size: int = -1) -> bytes:
+            return self._raw.read(size)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    def urlopen(request, timeout):
+        seen["accept"] = request.get_header("Accept-encoding")
+        return _GzipResponse()
+
+    monkeypatch.setattr("job_radar.official_http.urlopen", urlopen)
+    assert http_get_json("https://boards.example/jobs") == {"jobs": []}
+    assert seen["accept"] == "gzip"
+
+
+def test_redirect_handler_stays_on_https_and_caps_the_body(monkeypatch):
+    monkeypatch.setattr("job_radar.official_http.MAX_RESPONSE_BYTES", 8)
+    handler = _HttpsOnlyRedirectHandler()
+    opened: dict[str, str] = {}
+
+    class _Parent:
+        def open(self, request, timeout=None):
+            opened["url"] = request.full_url
+            return "followed"
+
+    handler.parent = _Parent()
+    request = Request("https://boards.example/jobs")
+    request.timeout = 30
+    body = BytesIO(b"x" * 100)
+    read = {"count": 0}
+    original = body.read
+
+    def counting(size=-1):
+        chunk = original(size)
+        read["count"] += len(chunk)
+        return chunk
+
+    body.read = counting  # type: ignore[method-assign]
+    headers = Message()
+    headers["Location"] = "https://boards.example/next"
+    assert handler.http_error_302(request, body, 302, "found", headers) == "followed"
+    assert opened["url"] == "https://boards.example/next"
+    assert read["count"] == 9
+
+    rejected = BytesIO(b"y" * 40)
+    rejected_read = {"count": 0}
+    original_rejected = rejected.read
+
+    def counting_rejected(size=-1):
+        chunk = original_rejected(size)
+        rejected_read["count"] += len(chunk)
+        return chunk
+
+    rejected.read = counting_rejected  # type: ignore[method-assign]
+    headers = Message()
+    headers["Location"] = "http://boards.example/next"
+    with pytest.raises(HTTPError, match="HTTPS"):
+        handler.http_error_302(request, rejected, 302, "found", headers)
+    assert rejected_read["count"] == 0

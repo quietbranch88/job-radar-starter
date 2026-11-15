@@ -7,7 +7,8 @@ from job_radar.catalog import Catalog, Company, Source
 from job_radar.config import Companies, Matching, Preferences, Profile, UserConfig
 from job_radar.dashboard import render_dashboard, render_dashboard_view_model
 from job_radar.domain.tracking import dashboard_marker
-from job_radar.posting_country import posting_country, scope_country
+from job_radar.posting_country import posting_country, resolve_posting_country, scope_country
+from job_radar.scan_workers import _fetch_scoped_jobs
 from job_radar.source_orchestration import scan_catalog_resilient
 
 
@@ -18,6 +19,21 @@ def test_one_market_stays_on_the_posting_and_several_follow_location():
     assert posting_country(("SG", "US"), "Singapore") == "SG"
     assert posting_country(("SG", "US"), "New York") == ""
     assert posting_country("SG,US", "United States") == "US"
+    assert posting_country(("US", "CA"), "San Francisco, CA") == ""
+    assert posting_country(("US", "CA"), "Toronto, Canada") == "CA"
+    assert posting_country(("US", "CA"), "Remote - US") == "US"
+    assert posting_country(("GB", "US"), "New England") == ""
+    assert posting_country(("GB", "US"), "New England, United Kingdom") == "GB"
+    assert posting_country(("GB", "US"), "New South Wales") == ""
+    assert posting_country(("IN", "US"), "Indianapolis, IN") == ""
+    assert posting_country(("DE", "FR"), "Île-de-France") == ""
+    assert posting_country(("DE", "FR"), "Berlin, Germany") == "DE"
+    assert posting_country(("DE", "FR"), "Berlin, DE") == ""
+    assert resolve_posting_country(("US", "CA"), "San Francisco, CA", "US") == "US"
+    assert resolve_posting_country(("US", "CA"), "San Francisco, CA", "United States") == "US"
+    assert resolve_posting_country(("US", "CA"), "San Francisco, CA") == ""
+    assert resolve_posting_country(("CA",), "San Francisco, CA", "US") == "CA"
+    assert resolve_posting_country(("DE", "FR"), "Berlin, Germany", "US") == "DE"
 
 
 def test_browser_markers_fold_application_states():
@@ -91,7 +107,28 @@ def test_inline_scan_uses_the_same_result_contract_as_a_resilient_scan(tmp_path:
     assert result["failures"][0]["company"] == "Broken"
     assert result["failures"][0]["category"] == "source_error"
     assert result["jobs"][0]["country"] == "SG"
+    assert isinstance(result["jobs"][0]["tracks"], list)
     assert (tmp_path / "latest.json").exists()
+
+
+def test_structured_country_is_kept_when_it_is_one_of_the_company_markets():
+    def get_json(_url: str):
+        return {
+            "jobs": [
+                {
+                    "id": "sf",
+                    "title": "Backend",
+                    "jobUrl": "https://example.test/sf",
+                    "location": "San Francisco, CA",
+                    "isListed": True,
+                    "address": {"postalAddress": {"addressCountry": "United States"}},
+                }
+            ]
+        }
+
+    jobs = _fetch_scoped_jobs("ashby", "example", "Example", "CA,US", get_json, 10)
+    assert jobs[0].country == "US"
+    assert jobs[0].location == "San Francisco, CA"
 
 
 def test_removed_helpers_stay_out_of_the_live_modules():

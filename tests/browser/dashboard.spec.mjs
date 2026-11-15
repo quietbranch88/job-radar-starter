@@ -135,6 +135,19 @@ test('an Applied card copies a confirmation command only after verification', as
   await expect(form.locator('textarea')).toHaveValue(/--confirmation-evidence "See receipt 1\/2 locally"/);
   await expect(form.locator('textarea')).toHaveValue(/--confirmed-at "2026-10-23T00:05:00\+08:00"/);
   await expect(form.locator('textarea')).toHaveValue(/--confirm-submitted$/);
+  await expect(form.locator('textarea')).toHaveValue(/--resume-version "backend-v2"/);
+  await expect(form.locator('textarea')).toHaveValue(/--channel "official-site"/);
+
+  await form.getByLabel('Applied at').fill('2026-11-14T05:36:00.123Z');
+  await form.getByLabel('Confirmed at').fill('2026-11-14T05:36:00.123Z');
+  await form.getByLabel('Confirmation note').press('Enter');
+  await expect(form.locator('textarea')).toHaveValue(/--applied-at "2026-11-14T05:36:00\.123Z"/);
+  await expect(form.locator('textarea')).toHaveValue(/--confirmed-at "2026-11-14T05:36:00\.123Z"/);
+
+  await form.getByLabel('Confirmed at').fill('2026-11-14T05:36:00');
+  await form.getByRole('button', { name: 'Copy confirmation command' }).click();
+  await expect(form.locator('.confirm-error')).toContainText('timezone');
+  await expect(form.locator('textarea')).toBeHidden();
 
   await page.getByRole('button', { name: 'Saved matches' }).click();
   const saved = page.locator('[data-match-key="job_active"]');
@@ -172,6 +185,12 @@ test('an Applied marker needs explicit local confirmation and survives stale bro
   await page.evaluate(() => localStorage.setItem('job-radar-status', JSON.stringify({ job_active: 'skip' })));
   await page.goto(pathToFileURL(rebuilt).href);
   await expect(page.locator('[data-key="job_active"]')).toHaveAttribute('data-status', 'applied');
+  await expect(page.locator('[data-key="job_active"]').getByTestId('confirm-application')).toHaveCount(0);
+  await expect(page.locator('[data-key="job_active"]')).toContainText('Recorded in local tracking.');
+  await page.getByRole('button', { name: 'Saved matches' }).click();
+  const saved = page.locator('[data-match-key="job_active"]');
+  await expect(saved.getByRole('button', { name: 'Clear status' })).toBeDisabled();
+  await page.getByRole('button', { name: 'List' }).click();
   await expect(page.getByTestId('tracking-summary')).toContainText('1 tracked applications');
   await expect(page.locator('#recommendations')).not.toContainText('Active Backend Engineer');
   await page.evaluate(() => localStorage.setItem('job-radar-status', JSON.stringify({ job_active: 'skip' })));

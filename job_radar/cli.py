@@ -79,10 +79,16 @@ def _parser() -> argparse.ArgumentParser:
     _add_profile_argument(doctor)
     doctor.add_argument("--jobs-output", type=Path, default=DEFAULT_JOBS)
     doctor.add_argument("--dashboard-output", type=Path, default=DEFAULT_DASHBOARD)
-    doctor.add_argument(
+    doctor_commands = doctor.add_mutually_exclusive_group()
+    doctor_commands.add_argument(
         "--ai-command",
         nargs=argparse.REMAINDER,
         help="compatibility scoring command; prefer review --provider-command",
+    )
+    doctor_commands.add_argument(
+        "--provider-command",
+        nargs=argparse.REMAINDER,
+        help="compact review command to check; must be the final option",
     )
 
     init = commands.add_parser(
@@ -139,6 +145,9 @@ def _parser() -> argparse.ArgumentParser:
     _add_checkpoint_arguments(run)
     run.add_argument('--run-manifest', type=Path, help='new per-attempt receipt; existing files are preserved')
     run.add_argument('--install-sync', action='store_true', help='embed the optional Cloudflare status client')
+    run.add_argument("--per-call-timeout", type=float, default=30)
+    run.add_argument("--total-review-deadline", type=float, default=300)
+    run.add_argument("--max-fast-calls", type=int, default=100)
     command_group = run.add_mutually_exclusive_group()
     command_group.add_argument(
         "--ai-command",
@@ -173,9 +182,6 @@ def _parser() -> argparse.ArgumentParser:
         nargs=argparse.REMAINDER,
         help="compact review provider executable; must be the final option",
     )
-    run.add_argument("--per-call-timeout", type=float, default=30)
-    run.add_argument("--total-review-deadline", type=float, default=300)
-    run.add_argument("--max-fast-calls", type=int, default=100)
     review.add_argument("--jobs", type=Path, required=True)
     review.add_argument("--output", type=Path, required=True)
     review.add_argument("--user-data", type=Path, default=DEFAULT_USER_DATA)
@@ -217,6 +223,24 @@ def _catalog_report(catalog: Catalog) -> dict[str, Any]:
         "sources": {name: asdict(value) for name, value in catalog.sources.items()},
         "companies": {name: asdict(value) for name, value in catalog.companies.items()},
     }
+
+
+def _format_atomic_failure(error: AtomicSourceScanFailed, args: argparse.Namespace, receipt_slot: RunReceiptSlot) -> str:
+    lines = [f"job-radar: {type(error).__name__}: {error}"]
+    for failure in error.result.get("failures") or []:
+        if not isinstance(failure, dict):
+            continue
+        lines.append(
+            f"{failure.get('company', '')} / {failure.get('source', '')} / {failure.get('category', '')}"
+        )
+    jobs_file = getattr(args, "jobs_output", None)
+    if jobs_file is None and getattr(args, "command", "") == "scan":
+        jobs_file = getattr(args, "output", None)
+    if jobs_file is not None:
+        lines.append(f"Jobs file left unchanged: {jobs_file}")
+    if receipt_slot.receipt is not None:
+        lines.append(f"Run receipt: {receipt_slot.receipt.path}")
+    return "\n".join(lines)
 
 
 def _writable_parent(path: Path) -> bool:
@@ -388,6 +412,10 @@ def _format_doctor(report: dict[str, Any]) -> str:
     if not ai["ready"]:
         lines.append(f"AI command was not found: {ai.get('executable', '')}")
         lines.append("  Leave off --ai-command to score with local rules.")
+    provider = report.get("provider") or {"ready": True}
+    if not provider["ready"]:
+        lines.append(f"Review command was not found: {provider.get('executable', '')}")
+        lines.append("  Leave off --provider-command. Compact review is a separate review command.")
     catalog_path = catalog["path"]
     if hint == "placeholders" and Path(catalog_path).as_posix().endswith("catalog/sources.yaml"):
         catalog_path = str(DEFAULT_USER_CATALOG)
@@ -444,11 +472,13 @@ def _doctor(args: argparse.Namespace) -> dict[str, Any]:
         },
     }
     ai = _command_ready(args.ai_command)
+    provider = _command_ready(args.provider_command)
     ready = (
         catalog_status["ready"]
         and profile_status["ready"]
         and all(item["ready"] for item in outputs.values())
         and ai["ready"]
+        and provider["ready"]
     )
     return {
         "ok": ready,
@@ -457,6 +487,7 @@ def _doctor(args: argparse.Namespace) -> dict[str, Any]:
         "outputs": outputs,
         "network_auth": {"required": False, "reason": "built-in sources are public APIs"},
         "ai": ai,
+        "provider": provider,
     }
 
 
@@ -775,7 +806,7 @@ def main(
         if args.json:
             print(json.dumps(report, ensure_ascii=False, sort_keys=True), file=stdout)
         else:
-            print(f"job-radar: {type(error).__name__}: {error}", file=stderr)
+            print(_format_atomic_failure(error, args, receipt_slot), file=stderr)
         return error.exit_code
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as error:
         report = {"ok": False, "error": {"type": type(error).__name__, "message": str(error)}}

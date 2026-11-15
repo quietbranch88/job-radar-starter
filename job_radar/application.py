@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from job_radar.config import UserConfig
-from job_radar.domain.jobs import Job
+from job_radar.domain.jobs import MAX_JD_EVIDENCE_CHARS, Job
 from job_radar.posting_country import location_matches_country
 
 
@@ -29,9 +29,61 @@ _AI_FIELDS = {
 }
 
 
-def _terms(job: Job) -> str:
-    return " ".join(
-        (
+# A token is a word, with C++ and C# kept intact. Hyphens, slashes, and dots are
+# boundaries, so "ai-product" is the consecutive tokens "ai" and "product".
+_TOKEN = re.compile(r"[a-z0-9]+(?:\+\+|#)?", re.IGNORECASE)
+_SENTENCE = re.compile(r"[.!?]+(?:\s+|$)")
+
+
+def _tokens(text: str) -> tuple[str, ...]:
+    return tuple(match.group(0).casefold() for match in _TOKEN.finditer(text))
+
+
+def _joined_evidence(chunks: Sequence[str]) -> str:
+    """Join description slices. A slice cut at the 500-character cap stays one word."""
+
+    if not chunks:
+        return ""
+    pieces = [chunks[0]]
+    for previous, chunk in zip(chunks, chunks[1:]):
+        if len(previous) == MAX_JD_EVIDENCE_CHARS:
+            pieces[-1] += chunk
+        else:
+            pieces.append(chunk)
+    return " ".join(pieces)
+
+
+def _contains_text(text: str, needle: tuple[str, ...]) -> bool:
+    if not needle or not text:
+        return False
+    width = len(needle)
+    for sentence in _SENTENCE.split(text):
+        spans = list(_TOKEN.finditer(sentence))
+        tokens = [match.group(0).casefold() for match in spans]
+        for index in range(len(tokens) - width + 1):
+            if tuple(tokens[index:index + width]) != needle:
+                continue
+            if width == 1:
+                span = spans[index]
+                before = sentence[span.start() - 1] if span.start() else ""
+                after = sentence[span.end()] if span.end() < len(sentence) else ""
+                if before == "-" or after == "-":
+                    continue
+            return True
+    return False
+
+
+def _matches(job: Job, term: str) -> bool:
+    needle = _tokens(term)
+    if not needle:
+        return False
+    # Go, C, R, and AI are whole words in a title. They are not read from the
+    # description, where "go live" and similar phrases are common.
+    short = len(needle) == 1 and needle[0].isalnum() and len(needle[0]) <= 2
+    if short:
+        fields: tuple[str, ...] = (job.title, job.category, *job.tracks, *job.skills)
+    else:
+        fields = (
             job.company,
             job.title,
             job.location,
@@ -39,29 +91,9 @@ def _terms(job: Job) -> str:
             job.category,
             *job.tracks,
             *job.skills,
-            *job.jd_evidence,
+            _joined_evidence(job.jd_evidence),
         )
-    ).casefold()
-
-
-# A token is a word, with C++ and C# kept intact. Hyphens, slashes, and dots are
-# boundaries, so "ai-product" is the consecutive tokens "ai" and "product".
-_TOKEN = re.compile(r"[a-z0-9]+(?:\+\+|#)?", re.IGNORECASE)
-
-
-def _tokens(text: str) -> tuple[str, ...]:
-    return tuple(match.group(0).casefold() for match in _TOKEN.finditer(text))
-
-
-def _contains(text: str, term: str) -> bool:
-    needle = _tokens(term)
-    if not needle:
-        return False
-    haystack = _tokens(text)
-    width = len(needle)
-    if width > len(haystack):
-        return False
-    return any(haystack[index:index + width] == needle for index in range(len(haystack) - width + 1))
+    return any(_contains_text(field, needle) for field in fields if field)
 
 
 def score_jobs(jobs: Sequence[Job], config: UserConfig) -> list[Job]:
@@ -75,10 +107,9 @@ def score_jobs(jobs: Sequence[Job], config: UserConfig) -> list[Job]:
     scored: list[Job] = []
 
     for job in jobs:
-        text = _terms(job)
         company = job.company.casefold()
         blocked_keyword = next(
-            (term for term in config.matching.exclude_keywords if _contains(text, term)),
+            (term for term in config.matching.exclude_keywords if _matches(job, term)),
             None,
         )
         if company in excluded:
@@ -126,17 +157,17 @@ def score_jobs(jobs: Sequence[Job], config: UserConfig) -> list[Job]:
             score += weights.country
             matches.append(f"country: {matched_country}")
 
-        role_matches = [role for role in config.preferences.roles if _contains(text, role)]
+        role_matches = [role for role in config.preferences.roles if _matches(job, role)]
         if role_matches:
             score += weights.role
             matches.append("role: " + ", ".join(role_matches))
 
-        track_matches = [track for track in config.preferences.tracks if _contains(text, track)]
+        track_matches = [track for track in config.preferences.tracks if _matches(job, track)]
         if track_matches:
             score += weights.track
             matches.append("track: " + ", ".join(track_matches))
 
-        skill_matches = [skill for skill in config.profile.skills if _contains(text, skill)]
+        skill_matches = [skill for skill in config.profile.skills if _matches(job, skill)]
         if skill_matches:
             score += min(weights.skill_cap, weights.skill * len(skill_matches))
             matches.append("skills: " + ", ".join(skill_matches))
@@ -146,7 +177,7 @@ def score_jobs(jobs: Sequence[Job], config: UserConfig) -> list[Job]:
             matches.append("preferred company")
 
         missing_must_have = [
-            term for term in config.matching.must_have if not _contains(text, term)
+            term for term in config.matching.must_have if not _matches(job, term)
         ]
         if missing_must_have:
             score -= weights.missing_must_have
@@ -168,7 +199,7 @@ def score_jobs(jobs: Sequence[Job], config: UserConfig) -> list[Job]:
 
         normalized_score = max(0, min(100, score))
         summary = (
-            "Matched local preferences: " + ", ".join(matches)
+            "Matched local preferences: " + "; ".join(matches)
             if matches
             else "No strong local preferences matched."
         )
