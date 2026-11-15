@@ -51,6 +51,41 @@ def test_structured_board_countries_are_kept_only_when_the_board_names_one():
     )
     assert disagreed[0].country == ""
 
+    taiwan = parse_greenhouse(
+        {
+            "jobs": [
+                {
+                    "id": 11,
+                    "title": "Backend",
+                    "absolute_url": "https://example.test/11",
+                    "location": {"name": "Taipei"},
+                    "offices": [
+                        {"location": "Taipei, Taiwan"},
+                        {"location": "Taipei"},
+                    ],
+                }
+            ]
+        },
+        company="Example",
+    )
+    assert taiwan[0].country == "TW"
+    assert parse_greenhouse(
+        {
+            "jobs": [
+                {
+                    "id": 12,
+                    "title": "Backend",
+                    "absolute_url": "https://example.test/12",
+                    "offices": [
+                        {"location": "Taipei, Taiwan"},
+                        {"location": "New York, United States"},
+                    ],
+                }
+            ]
+        },
+        company="Example",
+    )[0].country == ""
+
     lever = parse_lever(
         [{
             "id": "sf",
@@ -62,6 +97,10 @@ def test_structured_board_countries_are_kept_only_when_the_board_names_one():
         company="Example",
     )
     assert lever[0].country == "CA"
+    assert parse_lever(
+        [{**_posting(parse_lever), "country": "Taiwan"}],
+        "Example",
+    )[0].country == "TW"
     assert parse_lever(
         [{**_posting(parse_lever), "country": "California"}],
         "Example",
@@ -83,6 +122,10 @@ def test_structured_board_countries_are_kept_only_when_the_board_names_one():
         company="Example",
     )
     assert ashby[0].country == "US"
+    assert parse_ashby(
+        {"jobs": [{**_posting(parse_ashby), "address": {"postalAddress": {"addressCountry": "TW"}}, "isListed": True}]},
+        "Example",
+    )[0].country == "TW"
     assert parse_ashby(
         {"jobs": [{**_posting(parse_ashby), "address": "San Francisco", "isListed": True}]},
         "Example",

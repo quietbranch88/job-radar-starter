@@ -6,7 +6,7 @@ import multiprocessing
 import os
 import signal
 import time
-from datetime import date
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
@@ -406,10 +406,21 @@ def test_complete_scan_has_versioned_schema_and_no_failures(
         "failures",
     }
     assert result["contract_version"] == 1
-    assert result["observed_on"] == date.today().isoformat()
+    assert result["observed_on"] == orchestration.utc_observation_date()
     assert result["mode"] == "atomic"
     assert result["incomplete"] is False
     assert result["failures"] == []
+
+
+def test_default_observation_date_follows_the_utc_calendar():
+    from job_radar.source_orchestration import utc_observation_date
+
+    taipei = timezone(timedelta(hours=8))
+    pacific = timezone(timedelta(hours=-8))
+    assert utc_observation_date(datetime(2026, 11, 15, 2, tzinfo=taipei)) == "2026-11-14"
+    assert utc_observation_date(datetime(2026, 11, 14, 20, tzinfo=pacific)) == "2026-11-15"
+    with pytest.raises(ValueError, match="timezone"):
+        utc_observation_date(datetime(2026, 11, 15, 2))
 
 
 def test_reordered_catalog_produces_identical_order_and_stable_deduplication(

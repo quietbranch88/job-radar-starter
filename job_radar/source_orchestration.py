@@ -8,7 +8,7 @@ import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
@@ -28,6 +28,16 @@ from job_radar.scan_workers import (
     _start_worker,
 )
 from job_radar.source_health import SourceHealth
+
+
+def utc_observation_date(moment: datetime | None = None) -> str:
+    """Walk date on the UTC calendar used by checkpoint last_seen."""
+
+    if moment is None:
+        moment = datetime.now(timezone.utc)
+    if moment.tzinfo is None or moment.utcoffset() is None:
+        raise ValueError("observation clock must include a timezone")
+    return moment.astimezone(timezone.utc).date().isoformat()
 
 
 class AtomicSourceScanFailed(RuntimeError):
@@ -154,7 +164,7 @@ def scan_catalog_resilient(
             reserved.update((saved, saved.with_name(saved.name + '.guard')))
         if health_output in reserved or health_output.name.casefold().endswith('.guard'):
             raise ValueError('health output must be separate from jobs, checkpoint and guards')
-    observed = observed_on or date.today().isoformat()
+    observed = observed_on or utc_observation_date()
     date.fromisoformat(observed)
     if inline and (checkpoint is not None or resume or health_output is not None):
         raise ValueError("inline scan does not use checkpoint or health output")
