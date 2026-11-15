@@ -174,6 +174,19 @@ def upsert_application(
     return deepcopy(candidate)
 
 
+def _same_confirmed_instant(left: object, right: object) -> bool:
+    """Same UTC instant. The literal unknown stays distinct from every timestamp."""
+
+    if left == "unknown" or right == "unknown":
+        return left == right
+    if not isinstance(left, str) or not isinstance(right, str) or not left or not right:
+        return False
+    try:
+        return _aware_datetime(left, "confirmed_at") == _aware_datetime(right, "confirmed_at")
+    except (TypeError, ValueError):
+        return False
+
+
 def record_confirmed_application(
     repository: TrackingRepository,
     *,
@@ -219,6 +232,8 @@ def record_confirmed_application(
         for field in ("applied_at", "resume_version", "channel", "confirmation_evidence"):
             if candidate[field] != existing[0].get(field):
                 raise ValueError("conflicting confirmed application replay; preserve the existing record for explicit correction")
+        if not _same_confirmed_instant(candidate.get("confirmed_at"), existing[0].get("confirmed_at")):
+            raise ValueError("conflicting confirmed application replay; preserve the existing record for explicit correction")
         return deepcopy(existing[0])
     if existing and existing[0].get("status") != "interested":
         raise ValueError("an existing application must be reconciled explicitly; a marker cannot overwrite its history")

@@ -114,7 +114,12 @@ def stated_country_code(value: object) -> str:
 
 
 def agreed_country(locations: Sequence[str]) -> str:
-    """One country when every readable office location names that same country."""
+    """One country when every office that names a country names the same one.
+
+    A city line such as San Francisco names no country and is skipped. An
+    office that names two countries, or two offices that name different
+    countries, leaves the posting unlabeled.
+    """
 
     found: list[str] = []
     for location in locations:
@@ -125,9 +130,10 @@ def agreed_country(locations: Sequence[str]) -> str:
             for code in _HINTS
             if code != "remote" and location_matches_country(location, code)
         ]
-        if len(codes) != 1:
+        if len(codes) > 1:
             return ""
-        found.append(codes[0])
+        if len(codes) == 1:
+            found.append(codes[0])
     if found and len(set(found)) == 1:
         return found[0]
     return ""

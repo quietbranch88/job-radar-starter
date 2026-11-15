@@ -495,12 +495,14 @@ def _quote_powershell(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _schedule_arguments() -> list[str]:
+def _schedule_arguments(project_dir: Path) -> list[str]:
+    personal_catalog = project_dir / DEFAULT_USER_CATALOG
+    catalog = DEFAULT_USER_CATALOG if personal_catalog.is_file() else DEFAULT_CATALOG
     return [
         "--json",
         "run",
         "--catalog",
-        str(DEFAULT_CATALOG),
+        catalog.as_posix(),
         "--profile",
         str(DEFAULT_PROFILE),
         "--jobs-output",
@@ -523,7 +525,7 @@ def render_schedule(
         raise ValueError("daily_at must use 24-hour HH:MM format") from error
     project = project_dir.resolve()
     executable = executable.resolve()
-    arguments = _schedule_arguments()
+    arguments = _schedule_arguments(project)
     if platform == "cron":
         command = " ".join(
             [shlex.quote(str(executable)), *(shlex.quote(argument) for argument in arguments)]

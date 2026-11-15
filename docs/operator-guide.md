@@ -24,9 +24,13 @@ that succeeded. The default remains `atomic`.
 
 A company that lists more than one market keeps a structured country when
 that country is one of its markets. Lever reads `country`. Ashby reads
-`address.postalAddress.addressCountry`. Greenhouse reads a country only when
-every office location names that same country. A city line such as
-`San Francisco, CA` stays unlabeled when the board does not name the country.
+`address.postalAddress.addressCountry`. Greenhouse uses a country when every
+office that names one names the same country. An office that only names a
+city, such as `San Francisco`, is skipped. `San Francisco, CA` still does not
+count as Canada. `job-radar schedule render` prints a daily command and does
+not install it. When `user-data/sources.yaml` is already in the project
+directory, that command scans that file. Otherwise it scans
+`catalog/sources.yaml`.
 
 ## 2. Normalize, score, and review
 
@@ -148,7 +152,11 @@ generate submission-age follow-ups. Resume version, channel and a short local
 confirmation reference are required; do not paste credentials into the reference.
 
 Replaying an identical confirmation returns the existing application, including
-later interview/offer status. A conflicting confirmation or an existing legacy
+later interview/offer status. The same confirmation instant written with
+another timezone offset is the same replay. A different confirmation instant,
+or any other conflicting field, requires explicit reconciliation instead of
+overwriting history. A finished confirmation stays in place when the program
+stops after both tracking files are written. An existing legacy
 application requires explicit reconciliation instead of overwriting history.
 Existing application/event APIs support metadata and stage changes. Corrections
 to a confirmed submission identity or time require explicit local reconciliation;
