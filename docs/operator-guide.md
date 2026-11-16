@@ -147,12 +147,15 @@ application was submitted. It does not create an application or update funnel
 metrics. Marking Applied opens a confirmation form on that card, on Saved
 matches, and on the swipe card. A second click on Applied leaves the marker in
 place. Hide and Expired leave the default list until that status filter is
-selected. The form fills the job id and the current confirmation time. After
+selected. The review bar offers Undo for that removal until another status
+replaces it. The form fills the job id and the current confirmation time. After
 the verification box is checked, it copies a `tracking record-application`
 command. Opening the page from a file shows that command as a selected result.
 A confirmation earlier than Applied at is rejected. It does not write tracking
-state. Export Dashboard state, move `job-radar-state.json` into `user-data/`,
-and run the command from the repository root:
+state. Export state downloads `job-radar-state.json` for the confirmation command.
+Export markers downloads only the browser markers. Move
+`job-radar-state.json` into `user-data/`, and run the command from the
+repository root:
 
 ```powershell
 job-radar --json tracking record-application --from-dashboard user-data\job-radar-state.json --job-id "<stable-job-id-from-export>" --applied-at unknown --resume-version "backend-v2" --channel "official-site" --confirmation-evidence "Submission receipt checked locally" --confirmed-at "2026-10-23T00:05:00Z" --confirm-submitted
@@ -190,7 +193,14 @@ No HTTP write endpoint or application submission automation is added.
 Run `job-radar build-dashboard` against the normalized view model. The dashboard
 shows scan completeness, active/stale/expired lifecycle, recommendations,
 rejected audit, application metrics, due actions, filters, cards, and swipe
-review. Browser status buttons persist in localStorage.
+review. Browser status buttons persist in localStorage. The summary counts
+companies. Recommendations follow the current search and filters and open that
+role in the list. A country filter keeps a role when its stored country or its
+matched preference country is selected. A card shows `matches` plus that code
+when the two differ, and the location is on its own line. The filter summary
+stays on the collapsed control, and Clear filters resets it. When every role
+has the same check-before-applying note, the page shows that note once above
+the list.
 
 ## 5. Export, delete, or sync
 
