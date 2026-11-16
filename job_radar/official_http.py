@@ -91,7 +91,9 @@ class _HttpsOnlyRedirectHandler(HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
     def http_error_302(self, req: Request, fp: Any, code: int, msg: str, headers: Any):
-        bounded = _BoundedReader(fp, MAX_RESPONSE_BYTES + 1)
+        # Discard only a small redirect body. The response cap still applies
+        # when a test lowers MAX_RESPONSE_BYTES.
+        bounded = _BoundedReader(fp, min(64 * 1024, MAX_RESPONSE_BYTES + 1))
         return HTTPRedirectHandler.http_error_302(self, req, bounded, code, msg, headers)
 
     http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
@@ -100,14 +102,29 @@ class _HttpsOnlyRedirectHandler(HTTPRedirectHandler):
 _OPENER = build_opener(_HttpsOnlyRedirectHandler)
 
 
-def urlopen(request: Request, timeout: int = 30):
+def urlopen(request: Request, timeout: float = 30):
     """Open one official request. Tests replace this name."""
 
     return _OPENER.open(request, timeout=timeout)
 
 
+def _declared_length(headers: Any) -> int | None:
+    if headers is None or not hasattr(headers, "get"):
+        return None
+    raw = headers.get("Content-Length")
+    if raw is None:
+        return None
+    text = str(raw).strip().split(",")[0].strip()
+    if not text.isdigit():
+        return None
+    return int(text)
+
+
 def _read_body(response: Any) -> bytes:
     headers = getattr(response, "headers", None)
+    declared = _declared_length(headers)
+    if declared is not None and declared > MAX_RESPONSE_BYTES:
+        raise ValueError("official source response exceeded 50 MiB")
     encoding = ""
     if headers is not None and hasattr(headers, "get"):
         encoding = str(headers.get("Content-Encoding") or "")
@@ -120,7 +137,7 @@ def _read_body(response: Any) -> bytes:
 def http_get_json(
     url: str,
     *,
-    timeout: int = 30,
+    timeout: float = 30,
     sleeper: Callable[[float], None] = time.sleep,
     now: Callable[[], float] = time.time,
     max_attempts: int = MAX_RATE_LIMIT_ATTEMPTS,
@@ -133,6 +150,9 @@ def http_get_json(
         raise ValueError("max_attempts must be at least 1")
     if max_retry_wait < 0:
         raise ValueError("max_retry_wait must be zero or positive")
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+        raise ValueError("timeout must be positive")
+    deadline = time.monotonic() + float(timeout)
     request = Request(
         url,
         headers={
@@ -144,9 +164,13 @@ def http_get_json(
     attempt = 0
     while True:
         attempt += 1
+        if time.monotonic() >= deadline:
+            raise TimeoutError("official source exceeded its time limit")
         try:
             with urlopen(request, timeout=timeout) as response:
                 raw = _read_body(response)
+            if time.monotonic() > deadline:
+                raise TimeoutError("official source exceeded its time limit")
             break
         except HTTPError as error:
             status = error.code
@@ -158,7 +182,7 @@ def http_get_json(
             if status != 429 or attempt >= max_attempts:
                 raise
             wait = _retry_wait_seconds(headers, now, max_wait=max_retry_wait)
-            if wait is None:
+            if wait is None or time.monotonic() + wait > deadline:
                 raise
             if wait:
                 sleeper(wait)

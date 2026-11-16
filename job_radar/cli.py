@@ -439,11 +439,20 @@ def _format_doctor(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _catalog_for_doctor(path: Path) -> Path:
+    """Use the personal catalog when doctor was pointed at the shared default."""
+
+    if path == DEFAULT_CATALOG and (Path.cwd() / DEFAULT_USER_CATALOG).is_file():
+        return DEFAULT_USER_CATALOG
+    return path
+
+
 def _doctor(args: argparse.Namespace) -> dict[str, Any]:
-    catalog_status: dict[str, Any] = {"path": str(args.catalog.resolve()), "ready": False}
+    catalog_path = _catalog_for_doctor(args.catalog)
+    catalog_status: dict[str, Any] = {"path": str(catalog_path.resolve()), "ready": False}
     profile_status: dict[str, Any] = {"path": str(args.profile.resolve()), "ready": False}
     try:
-        loaded_catalog = load_catalog(args.catalog)
+        loaded_catalog = load_catalog(catalog_path)
         placeholders = _placeholder_companies(loaded_catalog)
         catalog_status.update(
             ready=not placeholders,
@@ -554,7 +563,7 @@ def render_schedule(
                 f"-WorkingDirectory {_quote_powershell(str(project))}",
                 "$Trigger = New-ScheduledTaskTrigger -Daily "
                 f"-At {_quote_powershell(daily_at)}",
-                "Register-ScheduledTask -TaskName 'Job Radar Daily Scan' "
+                "# Register-ScheduledTask -TaskName 'Job Radar Daily Scan' "
                 "-Action $Action -Trigger $Trigger -Description 'Scan official job APIs and rebuild the local dashboard'",
                 "",
             )

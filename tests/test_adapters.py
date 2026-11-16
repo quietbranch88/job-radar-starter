@@ -132,6 +132,67 @@ def test_structured_board_countries_are_kept_only_when_the_board_names_one():
     )[0].country == ""
 
 
+def test_greenhouse_limits_country_to_offices_named_on_the_posting():
+    toronto = parse_greenhouse(
+        {
+            "jobs": [
+                {
+                    "id": 21,
+                    "title": "Backend",
+                    "absolute_url": "https://example.test/21",
+                    "location": {"name": "Toronto, ON"},
+                    "offices": [
+                        {"name": "Toronto", "location": "Toronto, Ontario, Canada"},
+                        {"name": "New York", "location": "New York, New York, United States"},
+                        {"name": "San Francisco", "location": "San Francisco, California, United States"},
+                    ],
+                }
+            ]
+        },
+        company="Faire",
+    )
+    assert toronto[0].country == "CA"
+
+    named_country = parse_greenhouse(
+        {
+            "jobs": [
+                {
+                    "id": 22,
+                    "title": "Backend",
+                    "absolute_url": "https://example.test/22",
+                    "location": {"name": "Los Angeles, CA"},
+                    "offices": [{"name": "USA", "location": None}],
+                }
+            ]
+        },
+        company="Faire",
+    )
+    assert named_country[0].country == "US"
+
+
+def test_greenhouse_decodes_an_entity_encoded_description():
+    jobs = parse_greenhouse(
+        {
+            "jobs": [
+                {
+                    "id": 23,
+                    "title": "Backend",
+                    "absolute_url": "https://example.test/23",
+                    "content": (
+                        "&lt;div class=&quot;content&quot;&gt;&lt;p&gt;Backend engineer&lt;/p&gt;"
+                        "&lt;script&gt;secret()&lt;/script&gt;&lt;/div&gt;"
+                    ),
+                }
+            ]
+        },
+        company="Example",
+    )
+    evidence = " ".join(jobs[0].jd_evidence)
+    assert "Backend engineer" in evidence
+    assert "secret" not in evidence
+    assert "<div" not in evidence
+
+
 def test_greenhouse_html_keeps_entities_and_drops_script_bodies():
     jobs = parse_greenhouse(
         {

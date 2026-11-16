@@ -221,8 +221,8 @@ def test_skill_cap_limits_the_skill_bonus(tmp_path: Path):
         ],
         config,
     )
-    # base 30, five skills capped at 24, visa unknown -8.
-    assert scored[0].score == 46
+    # base 30, five skills capped at 24, visa unknown -5.
+    assert scored[0].score == 49
 
 
 def test_rule_based_scoring_uses_local_preferences_and_explicit_exclusions(tmp_path: Path):
@@ -450,3 +450,94 @@ time.sleep(30)
     assert time.monotonic() - started < 5
     assert not _pid_exists(int(parent_pid_path.read_text(encoding="utf-8")))
     assert not _pid_exists(int(child_pid_path.read_text(encoding="utf-8")))
+
+
+def test_default_unknown_visa_weight_lets_a_structural_match_publish(tmp_path: Path):
+    from job_radar.config import ScoreWeights
+
+    assert ScoreWeights().visa_unknown == 5
+    config = _config(tmp_path)
+    scored = application.score_jobs(
+        [
+            Job(
+                "greenhouse",
+                "plain",
+                "Cedarline Systems",
+                "Backend Engineer",
+                "Toronto, Canada",
+                "https://example.com/plain",
+                "2026-07-15",
+                country="CA",
+                category="backend",
+                tracks=("backend",),
+            )
+        ],
+        config,
+    )
+
+    assert scored[0].score == 65
+    assert "country: CA" in scored[0].summary
+    assert application.keeps_published_score(
+        scored[0].score, scored[0].country, scored[0].location, config
+    )
+
+
+def test_stated_country_does_not_override_a_different_named_country(tmp_path: Path):
+    config = _config(tmp_path)
+    remote = replace(config, preferences=replace(config.preferences, countries=("REMOTE",)))
+    united_states = replace(config, preferences=replace(config.preferences, countries=("US",)))
+    anywhere = replace(config, preferences=replace(config.preferences, countries=()))
+    bangalore, remote_role = application.score_jobs(
+        [
+            Job(
+                "greenhouse",
+                "bangalore",
+                "GitLab",
+                "Backend Engineer",
+                "Bangalore, India",
+                "https://example.com/bangalore",
+                "2026-07-15",
+                country="REMOTE",
+                category="backend",
+                tracks=("backend",),
+            ),
+            Job(
+                "greenhouse",
+                "remote",
+                "GitLab",
+                "Backend Engineer",
+                "Remote",
+                "https://example.com/remote",
+                "2026-07-15",
+                country="REMOTE",
+                category="backend",
+                tracks=("backend",),
+            ),
+        ],
+        remote,
+    )
+    city = application.score_jobs(
+        [
+            Job(
+                "greenhouse",
+                "city",
+                "Example",
+                "Backend Engineer",
+                "San Francisco",
+                "https://example.com/city",
+                "2026-07-15",
+                country="US",
+                category="backend",
+                tracks=("backend",),
+            )
+        ],
+        united_states,
+    )[0]
+
+    assert "country:" not in bangalore.summary
+    assert "country: REMOTE" in remote_role.summary
+    assert "country: US" in city.summary
+    assert application.keeps_published_score(
+        80, bangalore.country, bangalore.location, remote
+    ) is False
+    assert application.keeps_published_score(80, "SG", "Singapore", anywhere)

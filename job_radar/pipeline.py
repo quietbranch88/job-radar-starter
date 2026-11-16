@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from job_radar.application import SCORING_FIELDS, score_jobs
+from job_radar.application import SCORING_FIELDS, keeps_published_score, score_jobs
 from job_radar.catalog import load_catalog
 from job_radar.config import load_user_config
 from job_radar.dashboard import render_dashboard, render_dashboard_view_model
@@ -118,18 +118,17 @@ def build_dashboard(
                 (job.source, job.external_id): asdict(job)
                 for job in score_jobs(loaded, config)
             }
-            model["jobs"] = [
-                dict(
-                    item,
-                    **{
-                        field: rescored[(str(item["source"]), str(item["external_id"]))][field]
-                        for field in SCORING_FIELDS
-                    },
+            published_jobs = []
+            for item in model["jobs"]:
+                current = rescored[(str(item["source"]), str(item["external_id"]))]
+                if not keeps_published_score(
+                    current["score"], current["country"], current["location"], config
+                ):
+                    continue
+                published_jobs.append(
+                    dict(item, **{field: current[field] for field in SCORING_FIELDS})
                 )
-                for item in model["jobs"]
-                if (rescored[(str(item["source"]), str(item["external_id"]))]["score"] or 0)
-                >= config.matching.minimum_score
-            ]
+            model["jobs"] = published_jobs
         render_dashboard_view_model(model, output, install_sync=install_sync)
     return {
         "ok": True,

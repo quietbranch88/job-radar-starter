@@ -40,7 +40,7 @@ class ScoreWeights:
     missing_must_have: int = 20
     visa_listed: int = 5
     visa_absent: int = 25
-    visa_unknown: int = 8
+    visa_unknown: int = 5
 
 
 @dataclass(frozen=True)

@@ -49,4 +49,4 @@ matching:
     missing_must_have: 20
     visa_listed: 5
     visa_absent: 25
-    visa_unknown: 8
+    visa_unknown: 5

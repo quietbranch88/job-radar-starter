@@ -330,6 +330,8 @@ test('local edit, preview edit and disconnect invalidate late responses even if 
   await api('POST', { [A]: 'applied' });
   await page.locator('#syncPull').click();
   await expect(page.locator('#syncPreview')).toBeVisible();
+  await page.locator('details.filter-panel summary').click();
+  await page.locator('#statusChips button[data-value="skip"]').click();
   await page.locator(`[data-key="${A}"] [data-state=interested]`).click();
   await expect(page.locator('#syncPreview')).toBeHidden();
   expect((await local(page))[A]).toBe('interested');

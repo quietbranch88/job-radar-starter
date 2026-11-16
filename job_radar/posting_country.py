@@ -70,6 +70,18 @@ def location_matches_country(location: str, code: str) -> bool:
     return any(_contains_term(text, term) for term in terms)
 
 
+def location_names_other_country(location: str, country_code: str) -> bool:
+    """True when the location names a recognized country other than this code."""
+
+    stated = str(country_code or "").strip().casefold()
+    for code in _HINTS:
+        if code in {stated, "remote"}:
+            continue
+        if location_matches_country(location, code):
+            return True
+    return False
+
+
 def posting_country(countries: Sequence[str] | str, location: str) -> str:
     """One listed market stays on the posting. Several markets resolve from location text."""
     listed = _listed(countries)

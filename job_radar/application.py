@@ -7,7 +7,7 @@ from typing import Any
 
 from job_radar.config import UserConfig
 from job_radar.domain.jobs import MAX_JD_EVIDENCE_CHARS, Job
-from job_radar.posting_country import location_matches_country
+from job_radar.posting_country import location_matches_country, location_names_other_country
 
 
 SCORING_FIELDS = ("score", "summary", "risk", "tracks", "skills", "visa_supported")
@@ -15,6 +15,45 @@ SCORING_FIELDS = ("score", "summary", "risk", "tracks", "skills", "visa_supporte
 
 def is_hard_excluded(job: Job) -> bool:
     return job.score == 0 and job.summary == "Excluded by local preferences."
+
+
+def preferred_country_match(country: object, location: object, countries: Sequence[str]) -> str:
+    """Return the preferred country this posting may count, or an empty string."""
+
+    stated = str(country or "").strip()
+    place = location if isinstance(location, str) else ""
+    preferred = {code.casefold() for code in countries}
+    if stated.casefold() in preferred and (
+        location_matches_country(place, stated)
+        or not location_names_other_country(place, stated)
+    ):
+        return stated
+    return next(
+        (code for code in countries if location_matches_country(place, code)),
+        "",
+    )
+
+
+def matches_country_preference(country: object, location: object, config: UserConfig) -> bool:
+    """Use the same country rule as scoring when preferences list countries."""
+
+    if not config.preferences.countries:
+        return True
+    return bool(preferred_country_match(country, location, config.preferences.countries))
+
+
+def keeps_published_score(
+    score: object,
+    country: object,
+    location: object,
+    config: UserConfig,
+) -> bool:
+    """Keep a scored job that clears the minimum and a listed country preference."""
+
+    value = score if isinstance(score, int) and not isinstance(score, bool) else 0
+    if value < config.matching.minimum_score:
+        return False
+    return matches_country_preference(country, location, config)
 
 
 _AI_FIELDS = {
@@ -53,47 +92,69 @@ def _joined_evidence(chunks: Sequence[str]) -> str:
     return " ".join(pieces)
 
 
-def _contains_text(text: str, needle: tuple[str, ...]) -> bool:
-    if not needle or not text:
-        return False
-    width = len(needle)
+def _index_field(text: str) -> tuple[tuple[tuple[str, ...], tuple[tuple[int, int], ...], str], ...]:
+    indexed = []
     for sentence in _SENTENCE.split(text):
         spans = list(_TOKEN.finditer(sentence))
-        tokens = [match.group(0).casefold() for match in spans]
-        for index in range(len(tokens) - width + 1):
-            if tuple(tokens[index:index + width]) != needle:
-                continue
-            if width == 1:
-                span = spans[index]
-                before = sentence[span.start() - 1] if span.start() else ""
-                after = sentence[span.end()] if span.end() < len(sentence) else ""
-                if before == "-" or after == "-":
+        indexed.append(
+            (
+                tuple(match.group(0).casefold() for match in spans),
+                tuple((match.start(), match.end()) for match in spans),
+                sentence,
+            )
+        )
+    return tuple(indexed)
+
+
+def _prepare_job(job: Job) -> tuple[tuple[object, ...], tuple[object, ...]]:
+    short = (job.title, job.category, *job.tracks, *job.skills)
+    long = (
+        job.company,
+        job.title,
+        job.location,
+        job.country,
+        job.category,
+        *job.tracks,
+        *job.skills,
+        _joined_evidence(job.jd_evidence),
+    )
+    return (
+        tuple(_index_field(text) for text in short if text),
+        tuple(_index_field(text) for text in long if text),
+    )
+
+
+def _contains_indexed(fields: Sequence[object], needle: tuple[str, ...]) -> bool:
+    if not needle:
+        return False
+    width = len(needle)
+    for sentences in fields:
+        for tokens, positions, sentence in sentences:  # type: ignore[misc]
+            for index in range(len(tokens) - width + 1):
+                if tokens[index:index + width] != needle:
                     continue
-            return True
+                if width == 1:
+                    start, end = positions[index]
+                    before = sentence[start - 1] if start else ""
+                    after = sentence[end] if end < len(sentence) else ""
+                    if before == "-" or after == "-":
+                        continue
+                return True
     return False
 
 
-def _matches(job: Job, term: str) -> bool:
+def _prepared_matches(prepared: tuple[tuple[object, ...], tuple[object, ...]], term: str) -> bool:
     needle = _tokens(term)
     if not needle:
         return False
     # Go, C, R, and AI are whole words in a title. They are not read from the
     # description, where "go live" and similar phrases are common.
     short = len(needle) == 1 and needle[0].isalnum() and len(needle[0]) <= 2
-    if short:
-        fields: tuple[str, ...] = (job.title, job.category, *job.tracks, *job.skills)
-    else:
-        fields = (
-            job.company,
-            job.title,
-            job.location,
-            job.country,
-            job.category,
-            *job.tracks,
-            *job.skills,
-            _joined_evidence(job.jd_evidence),
-        )
-    return any(_contains_text(field, needle) for field in fields if field)
+    return _contains_indexed(prepared[0] if short else prepared[1], needle)
+
+
+def _matches(job: Job, term: str) -> bool:
+    return _prepared_matches(_prepare_job(job), term)
 
 
 def score_jobs(jobs: Sequence[Job], config: UserConfig) -> list[Job]:
@@ -108,8 +169,9 @@ def score_jobs(jobs: Sequence[Job], config: UserConfig) -> list[Job]:
 
     for job in jobs:
         company = job.company.casefold()
+        prepared = _prepare_job(job)
         blocked_keyword = next(
-            (term for term in config.matching.exclude_keywords if _matches(job, term)),
+            (term for term in config.matching.exclude_keywords if _prepared_matches(prepared, term)),
             None,
         )
         if company in excluded:
@@ -138,36 +200,24 @@ def score_jobs(jobs: Sequence[Job], config: UserConfig) -> list[Job]:
         matches: list[str] = []
         risks: list[str] = []
 
-        preferred_countries = {
-            country.casefold() for country in config.preferences.countries
-        }
-        matched_country = ""
-        if job.country and job.country.casefold() in preferred_countries:
-            matched_country = job.country
-        else:
-            matched_country = next(
-                (
-                    country
-                    for country in config.preferences.countries
-                    if location_matches_country(job.location, country)
-                ),
-                "",
-            )
+        matched_country = preferred_country_match(
+            job.country, job.location, config.preferences.countries
+        )
         if matched_country:
             score += weights.country
             matches.append(f"country: {matched_country}")
 
-        role_matches = [role for role in config.preferences.roles if _matches(job, role)]
+        role_matches = [role for role in config.preferences.roles if _prepared_matches(prepared, role)]
         if role_matches:
             score += weights.role
             matches.append("role: " + ", ".join(role_matches))
 
-        track_matches = [track for track in config.preferences.tracks if _matches(job, track)]
+        track_matches = [track for track in config.preferences.tracks if _prepared_matches(prepared, track)]
         if track_matches:
             score += weights.track
             matches.append("track: " + ", ".join(track_matches))
 
-        skill_matches = [skill for skill in config.profile.skills if _matches(job, skill)]
+        skill_matches = [skill for skill in config.profile.skills if _prepared_matches(prepared, skill)]
         if skill_matches:
             score += min(weights.skill_cap, weights.skill * len(skill_matches))
             matches.append("skills: " + ", ".join(skill_matches))
@@ -177,7 +227,7 @@ def score_jobs(jobs: Sequence[Job], config: UserConfig) -> list[Job]:
             matches.append("preferred company")
 
         missing_must_have = [
-            term for term in config.matching.must_have if not _matches(job, term)
+            term for term in config.matching.must_have if not _prepared_matches(prepared, term)
         ]
         if missing_must_have:
             score -= weights.missing_must_have

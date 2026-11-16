@@ -10,7 +10,7 @@ from job_radar.ai_review import (
     DEFAULT_PER_CALL_TIMEOUT_SECONDS,
     DEFAULT_TOTAL_DEADLINE_SECONDS,
 )
-from job_radar.application import SCORING_FIELDS, score_jobs
+from job_radar.application import SCORING_FIELDS, keeps_published_score, score_jobs
 from job_radar.config import UserConfig
 from job_radar.domain.jobs import Job
 from job_radar.domain.tracking import dashboard_marker, stable_job_id
@@ -208,7 +208,7 @@ def execute_public_workflow(
     ]
     published = [
         job for job in projected_jobs
-        if (job["score"] or 0) >= config.matching.minimum_score
+        if keeps_published_score(job.get("score"), job.get("country"), job.get("location"), config)
     ]
 
     if review_runner is None:

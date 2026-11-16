@@ -447,6 +447,68 @@ def test_reordered_catalog_produces_identical_order_and_stable_deduplication(
     assert first["jobs"][0]["company"] == "Alpha Board"
 
 
+def test_atomic_mode_stops_launching_after_the_first_failure(
+    orchestration: ModuleType,
+    tmp_path: Path,
+    monkeypatch,
+):
+    launched: list[str] = []
+
+    class _Connection:
+        def poll(self) -> bool:
+            return True
+
+        def recv(self):
+            return ("error", None)
+
+        def close(self) -> None:
+            return None
+
+    class _Process:
+        def is_alive(self) -> bool:
+            return False
+
+        def close(self) -> None:
+            return None
+
+    def start(context, company, get_json, maximum, source_timeout=30):
+        launched.append(company[2])
+        return {
+            "company_scope": company,
+            "company_name": company[0],
+            "source_name": company[1],
+            "process": _Process(),
+            "connection": _Connection(),
+            "ready": True,
+            "execution_deadline": time.monotonic() + 60,
+            "startup_deadline": time.monotonic() + 60,
+        }
+
+    monkeypatch.setattr(orchestration, "_start_worker", start)
+    with pytest.raises(orchestration.AtomicSourceScanFailed):
+        orchestration.scan_catalog_resilient(
+            _catalog(("First", "first"), ("Second", "second")),
+            lambda url: {"jobs": []},
+            mode="atomic",
+            per_source_timeout=2,
+            max_concurrency=1,
+            output=tmp_path / "latest.json",
+        )
+    assert launched == ["first"]
+
+    launched.clear()
+    partial = orchestration.scan_catalog_resilient(
+        _catalog(("First", "first"), ("Second", "second")),
+        lambda url: {"jobs": []},
+        mode="best-effort",
+        per_source_timeout=2,
+        max_concurrency=1,
+        output=tmp_path / "partial.json",
+    )
+    assert launched == ["first", "second"]
+    assert partial["incomplete"] is True
+
+
 def test_atomic_failure_raises_and_does_not_replace_last_complete_output(
     orchestration: ModuleType,
     tmp_path: Path,

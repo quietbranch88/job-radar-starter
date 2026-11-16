@@ -360,6 +360,25 @@ def test_browser_qa_hooks_are_framework_free_and_deterministic(
     assert "document.addEventListener('keydown'" in html
 
 
+def test_dashboard_payload_omits_description_evidence(
+    dashboard: ModuleType,
+    tmp_path: Path,
+):
+    job = _job("job_01")
+    job.update(
+        jd_evidence=["Backend engineer " * 20],
+        jd_evidence_source="greenhouse:content",
+        jd_hash="abc123",
+    )
+    html = _render(dashboard, tmp_path, _view_model(jobs=[job]))
+    embedded = _embedded_json(html, "dashboard-data")["jobs"][0]
+
+    assert "jd_evidence" not in embedded
+    assert "jd_evidence_source" not in embedded
+    assert "jd_hash" not in embedded
+    assert "Backend engineer" not in html.split('id="dashboard-data"', 1)[1]
+
+
 def test_large_dashboard_uses_one_canonical_payload_and_bounded_initial_render(
     dashboard: ModuleType,
     tmp_path: Path,

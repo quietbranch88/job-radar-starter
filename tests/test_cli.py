@@ -64,6 +64,11 @@ def test_schedule_render_is_safe_and_does_not_install_anything(tmp_path: Path):
     assert "New-ScheduledTaskAction" in windows
     assert "08:15" in windows
     assert "Register-ScheduledTask" in windows
+    registered = [
+        line for line in windows.splitlines() if "Register-ScheduledTask" in line
+    ]
+    assert registered
+    assert all(line.lstrip().startswith("#") for line in registered)
     assert "catalog/sources.yaml" in windows
 
     personal = tmp_path / "user-data" / "sources.yaml"
@@ -167,6 +172,32 @@ companies:
     assert report["catalog"]["created"] is False
     assert report["catalog"]["placeholders"] == ["Example"]
     assert "Kept" in profile.read_text(encoding="utf-8")
+
+
+def test_doctor_checks_the_personal_catalog_when_it_exists(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    catalog = tmp_path / "user-data" / "sources.yaml"
+    catalog.parent.mkdir()
+    _write_ready_catalog(catalog)
+    stdout = StringIO()
+
+    status = main(
+        [
+            "doctor",
+            "--profile",
+            str(tmp_path / "missing-profile.yaml"),
+            "--jobs-output",
+            str(tmp_path / "scans" / "latest.json"),
+            "--dashboard-output",
+            str(tmp_path / "dashboard" / "index.html"),
+        ],
+        stdout=stdout,
+    )
+
+    text = stdout.getvalue()
+    assert status == 1
+    assert str(catalog.resolve()) in text
+    assert "catalog/sources.yaml" not in text
 
 
 def test_doctor_explains_a_missing_profile_and_placeholder_boards(tmp_path: Path):
