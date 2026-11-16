@@ -50,7 +50,7 @@ test('desktop preserves review interactions, migration, persistence, and export'
   });
   const errors = await openDashboard(page, { width: 1440, height: 1000 });
 
-  await expect(page.getByTestId('job-card')).toHaveCount(3);
+  await expect(page.getByTestId('job-card')).toHaveCount(4);
   await expect(page.getByTestId('tracking-summary')).toContainText('4 tracked applications');
   await expect(page.locator('[data-key="job_active"]')).toHaveAttribute('data-status', 'interested');
 
@@ -228,4 +228,54 @@ test('an Applied marker needs explicit local confirmation and survives stale bro
   await expect(page.locator('#applicationRecordingHelp')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   await page.screenshot({ path: path.join(root, 'test-results', 'dashboard-evidence', 'confirmed-mobile-390.png'), fullPage: true });
+});
+
+test('hiding a role can be undone without opening the status filter', async ({ page }) => {
+  await openDashboard(page, { width: 1280, height: 900 });
+  await page.locator('[data-key="job_stale"]').getByRole('button', { name: 'Hide', exact: true }).click();
+  await expect(page.locator('[data-key="job_stale"]')).toHaveCount(0);
+  await expect(page.locator('#undoBar')).toBeVisible();
+  await expect(page.locator('#undoMessage')).toContainText('Hidden');
+  await expect(page.locator('#undoMessage')).toContainText('Stale Backend Engineer');
+  await page.locator('#undoStatus').click();
+  await expect(page.locator('[data-key="job_stale"]')).toBeVisible();
+  await expect(page.locator('#undoBar')).toBeHidden();
+});
+
+test('country filters follow the matched preference and recommendations open that role', async ({ page }) => {
+  await openDashboard(page, { width: 1280, height: 900 });
+  const remote = page.locator('[data-key="job_remote_match"]');
+  await expect(remote.locator('.place')).toContainText('Remote (UK)');
+  await expect(remote).toContainText('matches REMOTE');
+  await expect(page.locator('#companyCount')).toHaveText('2');
+  await expect(page.locator('#sharedRisk')).toContainText('Verify work authorization.');
+  await expect(page.locator('.job-card .risk')).toHaveCount(0);
+
+  await page.locator('details.filter-panel summary').click();
+  await page.locator('#countryChips button[data-value="REMOTE"]').click();
+  await expect(remote).toBeVisible();
+  await expect(page.locator('[data-key="job_active"]')).toHaveCount(0);
+  await expect(page.locator('#filterSummary')).toContainText('Country: REMOTE');
+  await expect(page.locator('#recommendations')).toContainText('Remote Match Backend Engineer');
+  await expect(page.locator('#recommendations')).not.toContainText('Active Backend Engineer');
+  await page.locator('#recommendations button').first().click();
+  await expect(remote).toHaveClass(/is-current/);
+
+  await page.locator('#countryChips button[data-value="GB"]').click();
+  await expect(remote).toBeVisible();
+  await expect(page.locator('[data-key="job_active"]')).toHaveCount(0);
+  await page.locator('#clearFilters').click();
+  await expect(page.locator('#filterSummary')).toHaveText('');
+  await expect(page.locator('[data-key="job_active"]')).toBeVisible();
+  await expect(page.locator('#clearFilters')).toBeHidden();
+});
+
+test('deck arrow keys work while a round button is focused', async ({ page }) => {
+  await openDashboard(page, { width: 1280, height: 900 });
+  await page.getByRole('button', { name: 'Swipe review' }).click();
+  await page.locator('.deck-actions [aria-label="Hide"]').focus();
+  await page.keyboard.press('ArrowLeft');
+  const state = await page.evaluate(() => JSON.parse(localStorage.getItem('job-radar-status')));
+  expect(state.job_active).toBe('skip');
+  await expect(page.locator('#undoBar')).toBeVisible();
 });

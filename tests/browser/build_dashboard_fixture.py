@@ -56,6 +56,14 @@ MODEL = {
         job("job_active", "active", 91),
         job("job_stale", "stale", 82),
         job("job_expired", "expired", 73),
+        {
+            **job("job_remote_match", "active", 64),
+            "company": "Monzo",
+            "title": "Remote Match Backend Engineer",
+            "location": "Cardiff, London or Remote (UK)",
+            "country": "GB",
+            "summary": "Matched local preferences: country: REMOTE; role: backend",
+        },
     ],
     "review": {
         "rejected": [

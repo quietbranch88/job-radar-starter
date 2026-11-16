@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from job_radar.adapters import Job
-from job_radar.dashboard import render_dashboard
+from job_radar.dashboard import render_dashboard, render_dashboard_view_model
 
 
 def test_dashboard_renders_normalized_jobs_without_private_profile(tmp_path: Path):
@@ -43,6 +43,76 @@ def test_dashboard_renders_normalized_jobs_without_private_profile(tmp_path: Pat
     assert ".job-secret" not in html
     assert 'data-theme="dark"' in html
     assert "prefers-color-scheme" not in html
+
+
+def test_dashboard_surfaces_location_matched_country_and_review_controls(tmp_path: Path):
+    output = tmp_path / "index.html"
+    render_dashboard_view_model(
+        {
+            "contract_version": 1,
+            "scan": {
+                "state": "complete",
+                "mode": "atomic",
+                "incomplete": False,
+                "observed_on": "2026-11-16",
+                "failures": [],
+            },
+            "jobs": [
+                {
+                    "source": "greenhouse",
+                    "external_id": "monzo",
+                    "stable_id": "job_monzo",
+                    "company": "Monzo",
+                    "title": "Backend Engineer",
+                    "location": "Cardiff, London or Remote (UK)",
+                    "url": "https://example.com/jobs/monzo",
+                    "score": 65,
+                    "country": "GB",
+                    "category": "backend",
+                    "summary": "Matched local preferences: country: REMOTE; role: backend",
+                    "risk": "verify visa support",
+                    "tracks": ["backend"],
+                    "skills": ["Python"],
+                },
+                {
+                    "source": "greenhouse",
+                    "external_id": "gitlab",
+                    "stable_id": "job_gitlab",
+                    "company": "GitLab",
+                    "title": "Backend Engineer",
+                    "location": "Remote, Poland",
+                    "url": "https://example.com/jobs/gitlab",
+                    "score": 65,
+                    "country": "REMOTE",
+                    "category": "backend",
+                    "summary": "Matched local preferences: country: REMOTE; role: backend",
+                    "risk": "verify visa support",
+                    "tracks": ["backend"],
+                    "skills": ["Python"],
+                },
+            ],
+            "review": {"rejected": [], "sampled_rejected_ids": []},
+            "tracking": {
+                "statuses": {},
+                "metrics": {"total": 0, "funnel": {}},
+                "due_actions": [],
+            },
+        },
+        output,
+    )
+
+    html = output.read_text(encoding="utf-8")
+    assert 'class="place">Cardiff, London or Remote (UK)' in html
+    assert "matches REMOTE" in html
+    assert 'id="companyCount">2<' in html
+    assert 'id="undoBar"' in html
+    assert 'id="filterSummary"' in html
+    assert 'id="clearFilters"' in html
+    assert "Check before applying: verify visa support" in html
+    cards = html.split('id="jobList"', 1)[1].split('id="loadMoreJobs"', 1)[0]
+    assert '<p class="risk">' not in cards
+    assert "pendingJobs().slice(0,3)" in html
+    assert "matchesCountry" in html
 
 
 def test_dashboard_has_a_useful_empty_state(tmp_path: Path):
@@ -138,7 +208,7 @@ def test_dashboard_preserves_the_private_versions_triage_workflow_without_privat
     assert "ArrowLeft" in html
     assert "ArrowRight" in html
     assert "ArrowUp" in html
-    assert "Export status" in html
+    assert "Export markers" in html
     assert "data-testid=\"confirm-application\"" in html
     assert "Copy confirmation command" in html
     assert "Recorded in local tracking." in html
