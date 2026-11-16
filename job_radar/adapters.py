@@ -1,4 +1,5 @@
 import hashlib
+import re
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any, Callable
@@ -84,8 +85,10 @@ class _PostingText(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self.hidden = 0
+        self.saw_tag = False
 
     def handle_starttag(self, tag: str, attrs: Any) -> None:
+        self.saw_tag = True
         if tag in {"script", "style"}:
             self.hidden += 1
         elif not self.hidden:
@@ -102,16 +105,28 @@ class _PostingText(HTMLParser):
             self.parts.append(data)
 
 
+def _plain_posting_text(value: str) -> str:
+    parser = _PostingText()
+    parser.feed(value)
+    parser.close()
+    text = " ".join("".join(parser.parts).split())
+    # Greenhouse sometimes stores the whole description as entity-encoded HTML.
+    # Parse that once more only when the first pass saw no real tags.
+    if parser.saw_tag or not text.lstrip().startswith("<"):
+        return text
+    parser = _PostingText()
+    parser.feed(text)
+    parser.close()
+    return " ".join("".join(parser.parts).split())
+
+
 def _public_jd(source: str, **fields: Any) -> dict[str, Any]:
     texts: list[str] = []
     origins: list[str] = []
     for field, value in fields.items():
         if not isinstance(value, str) or not value.strip():
             continue
-        parser = _PostingText()
-        parser.feed(value)
-        parser.close()
-        text = " ".join("".join(parser.parts).split())
+        text = _plain_posting_text(value)
         if text:
             texts.append(text)
             origins.append(field)
@@ -140,20 +155,42 @@ def _lever_jd(item: dict[str, Any]) -> dict[str, Any]:
     return _public_jd("lever", **fields)
 
 
+def _contains_phrase(text: str, phrase: str) -> bool:
+    folded = phrase.casefold().strip()
+    if len(folded) < 3 or not text:
+        return False
+    return re.search(
+        rf"(?<![a-z0-9]){re.escape(folded)}(?![a-z0-9])",
+        text.casefold(),
+    ) is not None
+
+
+def _greenhouse_office_text(office: dict[str, Any]) -> tuple[str, str]:
+    name = office.get("name")
+    name = name.strip() if isinstance(name, str) else ""
+    location = office.get("location")
+    if isinstance(location, dict):
+        location = location.get("name")
+    location = location.strip() if isinstance(location, str) else ""
+    return name, location or name
+
+
 def _greenhouse_country(item: dict[str, Any]) -> str:
     offices = item.get("offices")
     if not isinstance(offices, list):
         return ""
-    locations: list[str] = []
-    for office in offices:
-        if not isinstance(office, dict):
-            continue
-        location = office.get("location")
-        if isinstance(location, dict):
-            location = location.get("name")
-        if isinstance(location, str):
-            locations.append(location)
-    return agreed_country(locations)
+    texts = [
+        _greenhouse_office_text(office)
+        for office in offices
+        if isinstance(office, dict)
+    ]
+    texts = [(name, text) for name, text in texts if text]
+    posting = item.get("location")
+    posting_name = posting.get("name") if isinstance(posting, dict) else ""
+    if not isinstance(posting_name, str):
+        posting_name = ""
+    named = [text for name, text in texts if _contains_phrase(posting_name, name)]
+    return agreed_country(named or [text for _name, text in texts])
 
 
 def _lever_country(item: dict[str, Any]) -> str:

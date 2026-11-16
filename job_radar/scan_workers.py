@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import time
 from collections.abc import Callable
 from dataclasses import replace
@@ -29,6 +30,30 @@ _WORKER_TERMINATE_GRACE_SECONDS = 1
 _WORKER_KILL_GRACE_SECONDS = 1
 
 
+def _transport_with_deadline(get_json: Callable[..., Any], seconds: float) -> Callable[[str], Any]:
+    """Give one fetch the caller's remaining time when it accepts timeout=."""
+
+    deadline = time.monotonic() + float(seconds)
+    try:
+        parameters = inspect.signature(get_json).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+    accepts_timeout = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD or name == "timeout"
+        for name, parameter in parameters.items()
+    )
+
+    def bounded(url: str) -> Any:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("official source exceeded its time limit")
+        if accepts_timeout:
+            return get_json(url, timeout=remaining)
+        return get_json(url)
+
+    return bounded
+
+
 def _source_worker(
     result_connection: Connection,
     source_name: str,
@@ -37,6 +62,7 @@ def _source_worker(
     country: str,
     get_json: Callable[[str], Any],
     max_jobs_per_source: int,
+    source_timeout: float = 30,
 ) -> None:
     try:
         result_connection.send(("ready", time.monotonic()))
@@ -48,7 +74,7 @@ def _source_worker(
                     board,
                     company_name,
                     country,
-                    get_json,
+                    _transport_with_deadline(get_json, source_timeout),
                     max_jobs_per_source,
                 ),
             )
@@ -120,6 +146,7 @@ def _start_worker(
     company: tuple[str, str, str, str],
     get_json: Callable[[str], Any],
     max_jobs_per_source: int,
+    source_timeout: float = 30,
 ) -> dict[str, Any]:
     company_name, source_name, board, country = company
     parent_connection, child_connection = context.Pipe(duplex=False)
@@ -133,6 +160,7 @@ def _start_worker(
             country,
             get_json,
             max_jobs_per_source,
+            source_timeout,
         ),
     )
     try:

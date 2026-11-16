@@ -57,6 +57,8 @@ test('desktop preserves review interactions, migration, persistence, and export'
   await page.getByRole('button', { name: 'Swipe review' }).click();
   await expect(page.locator('#topSwipeCard')).toBeVisible();
   await page.keyboard.press('ArrowUp');
+  await expect(page.locator('#topSwipeCard').getByTestId('confirm-application')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Next role' })).toBeVisible();
   const state = await page.evaluate(() => JSON.parse(localStorage.getItem('job-radar-status')));
   expect(Object.values(state)).toContain('applied');
   expect(state['greenhouse:active']).toBeUndefined();
@@ -137,12 +139,22 @@ test('an Applied card copies a confirmation command only after verification', as
   await expect(form.locator('textarea')).toHaveValue(/--confirm-submitted$/);
   await expect(form.locator('textarea')).toHaveValue(/--resume-version "backend-v2"/);
   await expect(form.locator('textarea')).toHaveValue(/--channel "official-site"/);
+  await expect(form.locator('.confirm-error')).toBeHidden();
+  await expect(form.locator('.confirm-copy-note')).toContainText('Copy it from the box');
+  await card.getByRole('button', { name: '✓ Applied', exact: true }).click();
+  await expect(card).toHaveAttribute('data-status', 'applied');
+  await expect(form.locator('textarea')).toHaveValue(/--job-id "job_active"/);
 
   await form.getByLabel('Applied at').fill('2026-11-14T05:36:00.123Z');
   await form.getByLabel('Confirmed at').fill('2026-11-14T05:36:00.123Z');
   await form.getByLabel('Confirmation note').press('Enter');
   await expect(form.locator('textarea')).toHaveValue(/--applied-at "2026-11-14T05:36:00\.123Z"/);
   await expect(form.locator('textarea')).toHaveValue(/--confirmed-at "2026-11-14T05:36:00\.123Z"/);
+
+  await form.getByLabel('Confirmed at').fill('2026-11-14T05:35:00.123Z');
+  await form.getByRole('button', { name: 'Copy confirmation command' }).click();
+  await expect(form.locator('.confirm-error')).toContainText('same time as Applied at or later');
+  await expect(form.locator('textarea')).toBeHidden();
 
   await form.getByLabel('Confirmed at').fill('2026-11-14T05:36:00');
   await form.getByRole('button', { name: 'Copy confirmation command' }).click();
@@ -165,6 +177,20 @@ test('an Applied card copies a confirmation command only after verification', as
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   expect(errors.consoleErrors).toEqual([]);
   expect(errors.pageErrors).toEqual([]);
+});
+
+test('hidden and expired roles leave the list until that status filter is selected', async ({ page }) => {
+  await openDashboard(page, { width: 1280, height: 900 });
+  await page.locator('details.filter-panel summary').click();
+  await page.locator('[data-key="job_stale"]').getByRole('button', { name: 'Hide', exact: true }).click();
+  await expect(page.locator('[data-key="job_stale"]')).toHaveCount(0);
+  await page.locator('#statusChips button[data-value="skip"]').click();
+  await expect(page.locator('[data-key="job_stale"]')).toBeVisible();
+  await page.locator('#statusChips button[data-value=""]').click();
+  await page.locator('[data-key="job_expired"]').getByRole('button', { name: 'Expired', exact: true }).click();
+  await expect(page.locator('[data-key="job_expired"]')).toHaveCount(0);
+  await page.locator('#statusChips button[data-value="dead"]').click();
+  await expect(page.locator('[data-key="job_expired"]')).toBeVisible();
 });
 
 test('an Applied marker needs explicit local confirmation and survives stale browser state after rebuild', async ({ page }) => {

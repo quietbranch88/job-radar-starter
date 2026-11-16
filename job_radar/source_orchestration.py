@@ -26,6 +26,7 @@ from job_radar.scan_workers import (
     _close_workers,
     _fetch_scoped_jobs,
     _start_worker,
+    _transport_with_deadline,
 )
 from job_radar.source_health import SourceHealth
 
@@ -210,7 +211,13 @@ def _scan_companies(companies, get_json, *, checkpoint_state, observed_on, mode,
 
     try:
         while pending or workers:
-            while pending and len(workers) < max_concurrency:
+            if mode == "atomic" and failures and not workers:
+                break
+            while (
+                pending
+                and len(workers) < max_concurrency
+                and not (mode == "atomic" and failures)
+            ):
                 company = pending.popleft()
                 if health is not None:
                     health.begin(company)
@@ -220,6 +227,7 @@ def _scan_companies(companies, get_json, *, checkpoint_state, observed_on, mode,
                         company,
                         get_json,
                         max_jobs_per_source,
+                        source_timeout=per_source_timeout,
                     )
                 )
 
@@ -437,11 +445,18 @@ def _scan_inline(
     failures: list[dict[str, str]] = []
     for company in companies:
         company_name, source_name, _board, _country = company
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_guarded_fetch, company, get_json, max_jobs_per_source)
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            future = pool.submit(
+                _guarded_fetch,
+                company,
+                _transport_with_deadline(get_json, per_source_timeout),
+                max_jobs_per_source,
+            )
             try:
                 kind, payload = future.result(timeout=per_source_timeout)
             except TimeoutError:
+                future.cancel()
                 failures.append(
                     _failure(
                         source_name,
@@ -451,6 +466,8 @@ def _scan_inline(
                     )
                 )
                 continue
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
         if kind != "ok":
             failures.append(_inline_failure(source_name, company_name, payload, max_jobs_per_source))
             continue

@@ -76,7 +76,10 @@ def test_atomic_failure_preserves_old_output_but_finishes_health(tmp_path: Path)
     assert output.read_text(encoding='utf8') == 'previous output'
     health = json.loads((tmp_path / 'health.json').read_text(encoding='utf8'))
     assert health['state'] == 'failed' and health['finished_at']
-    assert {entry['failure_category'] for entry in health['entries']} == {'malformed'}
+    entries = {entry['company']: entry for entry in health['entries']}
+    assert entries['healthy']['state'] == 'failed'
+    assert entries['healthy']['failure_category'] == 'malformed'
+    assert entries['retry']['state'] == 'pending'
 
 
 @pytest.mark.parametrize('code,category', [(403, 'access_denied'), (404, 'not_found'), (503, 'upstream_error')])
@@ -98,7 +101,7 @@ def test_network_timeout_is_distinct_from_parent_kill_deadline(tmp_path):
 
 @pytest.mark.parametrize('mode', ['best-effort', 'atomic'])
 def test_dead_worker_without_poll_message_cannot_finish_health_as_complete(tmp_path, monkeypatch, mode):
-    def dead_worker(context, company, get_json, maximum):
+    def dead_worker(context, company, get_json, maximum, source_timeout=30):
         return {'company_scope': company, 'company_name': company[0], 'source_name': company[1],
                 'process': SimpleNamespace(is_alive=lambda: False, close=lambda: None),
                 'connection': SimpleNamespace(poll=lambda: False, close=lambda: None),
@@ -117,9 +120,16 @@ def test_dead_worker_without_poll_message_cannot_finish_health_as_complete(tmp_p
     assert result['incomplete'] is True
     health = json.loads((tmp_path / 'health.json').read_text(encoding='utf8'))
     assert health['state'] == 'failed'
-    assert {entry['state'] for entry in health['entries']} == {'failed'}
-    assert {entry['failure_category'] for entry in health['entries']} == {'source_error'}
-    assert all(entry['elapsed_seconds'] is not None for entry in health['entries'])
+    entries = {entry['company']: entry for entry in health['entries']}
+    assert entries['healthy']['state'] == 'failed'
+    assert entries['healthy']['failure_category'] == 'source_error'
+    assert entries['healthy']['elapsed_seconds'] is not None
+    if mode == 'atomic':
+        assert entries['retry']['state'] == 'pending'
+    else:
+        assert entries['retry']['state'] == 'failed'
+        assert entries['retry']['failure_category'] == 'source_error'
+        assert entries['retry']['elapsed_seconds'] is not None
 
 
 @pytest.mark.parametrize('name', ['jobs.json', 'checkpoint.json', 'checkpoint.json.guard'])

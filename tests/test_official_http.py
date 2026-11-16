@@ -133,6 +133,44 @@ def test_gzip_response_is_decoded_inside_the_body_cap(monkeypatch):
     assert seen["accept"] == "gzip"
 
 
+def test_declared_content_length_above_the_cap_is_not_read(monkeypatch):
+    class _Huge:
+        headers = {"Content-Length": str(50 * 1024 * 1024 + 1)}
+
+        def read(self, _limit: int) -> bytes:
+            raise AssertionError("body was read")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    monkeypatch.setattr("job_radar.official_http.urlopen", lambda *_args, **_kwargs: _Huge())
+
+    with pytest.raises(ValueError, match="50 MiB"):
+        http_get_json("https://boards.example/jobs")
+
+
+def test_retry_wait_past_the_request_budget_is_not_slept(monkeypatch):
+    clock = {"now": 0.0}
+    monkeypatch.setattr("job_radar.official_http.time.monotonic", lambda: clock["now"])
+
+    def urlopen(_request, timeout):
+        assert timeout == 30
+        clock["now"] = 29
+        raise _http_error(429, {"Retry-After": "2"})
+
+    monkeypatch.setattr("job_radar.official_http.urlopen", urlopen)
+    waits: list[float] = []
+
+    with pytest.raises(HTTPError) as caught:
+        http_get_json("https://boards.example/jobs", sleeper=waits.append)
+
+    assert caught.value.code == 429
+    assert waits == []
+
+
 def test_redirect_handler_stays_on_https_and_caps_the_body(monkeypatch):
     monkeypatch.setattr("job_radar.official_http.MAX_RESPONSE_BYTES", 8)
     handler = _HttpsOnlyRedirectHandler()

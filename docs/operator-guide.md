@@ -4,9 +4,10 @@
 
 First visit: from the repository root run `job-radar init`, edit the preferences and company files it names, then `job-radar doctor --catalog user-data/sources.yaml`. The shared `catalog/sources.yaml` file lists public Greenhouse and Ashby boards for Airwallex, Cohere, Faire, GitLab, Monzo, OpenAI, and PayPay. Delete companies you do not want. A board value that starts with `replace-with-your-board` still has to be replaced with the name from that company's public careers URL before a live scan.
 
-Run `job-radar doctor`, then initialize the local tracking store through the
-tracking API or your agent/script adapter. Configure only official Greenhouse,
-Lever, or Ashby boards you are authorized to query.
+When `user-data/sources.yaml` exists, `job-radar doctor` checks that file and
+prints the next command for it. `job-radar run` still defaults to
+`catalog/sources.yaml`. Configure only official Greenhouse, Lever, or Ashby
+boards you are authorized to query.
 
 Atomic mode does not replace the last complete output when any configured
 source fails. Best-effort mode writes partial healthy-source results with
@@ -25,15 +26,22 @@ that succeeded. The default remains `atomic`.
 A company that lists more than one market keeps a structured country when
 that country is one of its markets. Lever reads `country`. Ashby reads
 `address.postalAddress.addressCountry`. Greenhouse uses a country when every
-office that names one names the same country. An office that only names a
-city, such as `San Francisco` or `Taipei`, is skipped. `Taiwan` and a
-structured country field of `TW` count as Taiwan. `San Francisco, CA` still
-does not count as Canada. When `scan`, `run`, or `review` omits
-`--observed-on`, the walk date is the current UTC date, the same calendar a
-checkpoint stores in `last_seen`. `job-radar schedule render` prints a daily
-command and does not install it. When `user-data/sources.yaml` is already in
-the project directory, that command scans that file. Otherwise it scans
-`catalog/sources.yaml`.
+office that names one names the same country. When the posting location names
+an office, only those offices are compared. An office without a location
+string uses its name, so `USA` counts as the United States. An office that
+only names a city, such as `San Francisco` or `Taipei`, is skipped. `Taiwan`
+and a structured country field of `TW` count as Taiwan. `San Francisco, CA`
+still does not count as Canada. A preferred-country bonus uses the stored
+country when the location agrees with it or names no other recognized country.
+`Bangalore, India` on a remote-only company does not count as Remote. When
+preferences list countries, a job is published only when its country or
+location matches one of them by that same rule. When `scan`, `run`, or `review` omits `--observed-on`, the walk
+date is the current UTC date, the same calendar a checkpoint stores in
+`last_seen`. `job-radar schedule render` prints a daily command and does not
+install it. The Windows script comments out `Register-ScheduledTask`, so
+running the file does not register the task. When `user-data/sources.yaml` is
+already in the project directory, that command scans that file. Otherwise it
+scans `catalog/sources.yaml`.
 
 ## 2. Normalize, score, and review
 
@@ -71,7 +79,10 @@ stay intact, and a hyphenated term such as `ai-product` matches the consecutive
 words in that same field. The summary separates each matched category with a
 semicolon. Optional
 `matching.weights` in the local profile replaces the default point values.
-Those weights stay on this machine and are not included in a review request.
+The example `visa_unknown` weight is 5, so a role that matches country, role,
+track, and a required term reaches the example minimum of 65 before any skill
+bonus. Those weights stay on this machine and are not included in a review
+request.
 
 Local rules run first. A hard exclusion cannot be reversed by a model. Eligible
 jobs can receive fast review from the one configured provider. AI output is advisory.
@@ -133,11 +144,15 @@ records rather than entered separately.
 
 The Dashboard's Applied button records a browser marker, not evidence that an
 application was submitted. It does not create an application or update funnel
-metrics. Marking Applied opens a confirmation form on that card and on Saved
-matches. The form fills the job id and, after the verification box is checked,
-copies a `tracking record-application` command. It does not write tracking
+metrics. Marking Applied opens a confirmation form on that card, on Saved
+matches, and on the swipe card. A second click on Applied leaves the marker in
+place. Hide and Expired leave the default list until that status filter is
+selected. The form fills the job id and the current confirmation time. After
+the verification box is checked, it copies a `tracking record-application`
+command. Opening the page from a file shows that command as a selected result.
+A confirmation earlier than Applied at is rejected. It does not write tracking
 state. Export Dashboard state, move `job-radar-state.json` into `user-data/`,
-and run:
+and run the command from the repository root:
 
 ```powershell
 job-radar --json tracking record-application --from-dashboard user-data\job-radar-state.json --job-id "<stable-job-id-from-export>" --applied-at unknown --resume-version "backend-v2" --channel "official-site" --confirmation-evidence "Submission receipt checked locally" --confirmed-at "2026-10-23T00:05:00Z" --confirm-submitted
