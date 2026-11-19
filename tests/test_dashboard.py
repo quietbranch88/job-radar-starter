@@ -104,6 +104,8 @@ def test_dashboard_surfaces_location_matched_country_and_review_controls(tmp_pat
     html = output.read_text(encoding="utf-8")
     assert 'class="place">Cardiff, London or Remote (UK)' in html
     assert "matches REMOTE" in html
+    assert 'class="reason-chip">country: REMOTE' in html
+    assert 'aria-label="Match score"><b>65</b><small>#1</small>' in html
     assert 'id="companyCount">2<' in html
     assert 'id="undoBar"' in html
     assert 'id="filterSummary"' in html

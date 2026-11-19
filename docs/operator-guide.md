@@ -197,7 +197,10 @@ review. Browser status buttons persist in localStorage. The summary counts
 companies. Recommendations follow the current search and filters and open that
 role in the list. A country filter keeps a role when its stored country or its
 matched preference country is selected. A card shows `matches` plus that code
-when the two differ, and the location is on its own line. The filter summary
+when the two differ, and the location is on its own line. Each card shows its
+review rank, and a matched-preference summary is also shown as short chips.
+Tied scores keep a direct country match ahead of a location-only match, then
+place name. Scan status and the ranked list come before tracking notes. The filter summary
 stays on the collapsed control, and Clear filters resets it. When every role
 has the same check-before-applying note, the page shows that note once above
 the list.
