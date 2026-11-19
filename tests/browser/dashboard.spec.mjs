@@ -245,7 +245,14 @@ test('hiding a role can be undone without opening the status filter', async ({ p
 test('country filters follow the matched preference and recommendations open that role', async ({ page }) => {
   await openDashboard(page, { width: 1280, height: 900 });
   const remote = page.locator('[data-key="job_remote_match"]');
+  await expect(page.locator('[data-key="job_active"] .score small')).toHaveText('#1');
+  const tiedOrder = await page.evaluate(() => compareJobs(
+    { score: 65, country: 'GB', location: 'London', title: 'B', summary: 'Matched local preferences: country: REMOTE' },
+    { score: 65, country: 'REMOTE', location: 'Remote', title: 'A', summary: 'Matched local preferences: country: REMOTE' },
+  ));
+  expect(tiedOrder).toBeGreaterThan(0);
   await expect(remote.locator('.place')).toContainText('Remote (UK)');
+  await expect(remote.locator('.reason-chip').first()).toContainText('country: REMOTE');
   await expect(remote).toContainText('matches REMOTE');
   await expect(page.locator('#companyCount')).toHaveText('2');
   await expect(page.locator('#sharedRisk')).toContainText('Verify work authorization.');
